@@ -1,0 +1,31 @@
+# Python-generated files
+__pycache__/
+*.py[ocdz]
+build/
+dist/
+wheels/
+*.egg-info
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments / tool caches
+.venv/
+.env/
+.pdm-build/
+.uv-cache/
+
+# Environment/config
+.env
+.env.*
+!/.env.example
+
+# Logs & runtime outputs
+logs/
+output/
+
+# Data artifacts (coordinate transforms, maps)
+data/coordinate_models/
+
+# Misc
+.DS_Store

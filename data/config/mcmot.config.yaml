@@ -1,0 +1,50 @@
+system:
+  coordinate_transform_mode: "tps"  # tps(npz) 或 homography(npy)
+
+tracking:
+  trackable_classes:
+    - "person"
+    - "stacker"
+  match_threshold: 1.0
+  max_traj_loss: 1000.0  # 依據地圖比例代表約 1000 pixels 差異
+  distance_threshold_m: 5.0  # 可依實際倉儲大小調整（設為 null 表示停用）
+
+map:
+  image_path: "data/coordinate_models/global_map.png"
+  pixel_width: 3840
+  pixel_height: 1920
+  width_meters: 120.0
+  height_meters: 60.0
+
+cameras:
+  - camera_id: "camera1"
+    edge_id: "cam01"
+    name: "Camera 1"
+    enabled: true
+    coordinate_matrix_ckpt: "data/coordinate_models/cam1_tps_model.npz"
+    ignore_polygons: "data/coordinate_models/ignore_polygons.npy"
+    color_hex: "#228B22"
+
+  - camera_id: "camera2"
+    edge_id: "cam02"
+    name: "Camera 2"
+    enabled: true
+    coordinate_matrix_ckpt: "data/coordinate_models/cam2_tps_model.npz"
+    ignore_polygons: "data/coordinate_models/ignore_polygons.npy"
+    color_hex: "#4169E1"
+
+  - camera_id: "camera3"
+    edge_id: "edge_cam03"
+    name: "Camera 3"
+    enabled: false
+    coordinate_matrix_ckpt: "data/coordinate_models/cam3_tps_model.npz"
+    ignore_polygons: "data/coordinate_models/ignore_polygons.npy"
+    color_hex: "#DAA520"
+
+  - camera_id: "camera4"
+    edge_id: "edge_cam04"
+    name: "Camera 4"
+    enabled: false
+    coordinate_matrix_ckpt: "data/coordinate_models/cam4_tps_model.npz"
+    ignore_polygons: "data/coordinate_models/ignore_polygons.npy"
+    color_hex: "#6A5ACD"
