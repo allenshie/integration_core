@@ -49,7 +49,7 @@ python main.py
 | --- | --- | --- |
 | `APP_TIMEZONE` | `Asia/Taipei` | Pipeline 排程時區。|
 | `LOOP_INTERVAL_SECONDS` | `5` | 工作階段 workflow 間隔。|
-| `NON_WORKING_IDLE_SECONDS` | `30` | 非工作階段 idle 間隔。|
+| `NON_WORKING_IDLE_SECONDS` | `30` | 供傳統非工作流程使用的預設 idle 秒數，可由 selector/pipeline 自行決定是否採用。|
 | `EDGE_EVENT_PORT` | `9000` | HTTP 伺服器對外 Port。|
 | `MONITOR_ENDPOINT` | *(未設定)* | Monitoring 服務 base URL。|
 | `INTEGRATION_MONITOR_SERVICE_NAME` | `integration-daemon` | 回報監控時使用的 service name。|
@@ -63,6 +63,10 @@ python main.py
 | `FORMAT_STRATEGY_CLASS` | *(未設定)* | 指定格式轉換引擎類別（`package.module:Class`），未設定使用內建摘要邏輯。|
 | `RULES_ENGINE_CLASS` | *(未設定)* | 指定規則引擎類別（`package.module:Class`），需繼承 `BaseRuleEngine`；未設定則使用內建 `DefaultRuleEngine`。|
 | `RULES_DETAIL` | *(未設定)* | 為規則節點附加的描述字串，僅用於 log。|
+| `EVENT_DISPATCH_ENGINE_CLASS` | *(未設定)* | 指定事件派送引擎（`package.module:Class`），負責將規則/系統事件輸出到外部 API 或資料庫；未設定使用只寫 log 的預設實作。|
+| `PIPELINE_SELECTOR_CLASS` | *(未設定)* | 指定 `BasePipelineSelector` 子類，決定每輪迴圈要執行哪個 pipeline；未設定則使用內建 `WorkingHoursSelector`（永遠執行 core 的 working pipeline）。|
+| `PIPELINE_TASK_CLASSES` | *(未設定)* | 以 `name=package.module:Class` 形式註冊額外 pipeline，多個條目以逗號分隔；可用 selector 返回對應名稱以指派自訂 pipeline。|
+| `PIPELINE_SLEEP_SECONDS` | *(未設定)* | 以 `name=seconds` 形式指定 pipeline 預設 loop interval，例如 `working=0.1,off_hours=15`；當 pipeline/selector 沒有回傳 `sleep` 時就會使用對應值。|
 | `GLOBAL_MAP_VIS_ENABLED` | `0` | 啟用全局地圖可視化（僅在 MC-MOT 有 map 設定時生效）。|
 | `GLOBAL_MAP_VIS_MODE` | `write` | `write` 只輸出檔案、`show` 只顯示視窗、`both` 同時進行。|
 | `GLOBAL_MAP_VIS_OUTPUT` | `output/global_map` | 當 mode 包含 `write` 時輸出的目錄。|
@@ -108,20 +112,16 @@ integration/
 
 程式碼與資料分離後，只要把 `src/` 加入 `PYTHONPATH`（`main.py` 已自動處理），即可維持 `from integration.xxx import` 的匯入方式。部署到容器或其他環境時，也只需同步 `src/` 與 `data/` 即可。
 
-## Pipeline 流程
+## Pipeline 與插件
 
-工作時段內的 pipeline 由四個節點組成（非工作時段則僅執行 `NonWorkingUpdateTask`）：
+Working pipeline 的節點順序、PipelineRegistry/selector、事件派送流程等細節已整理在 [`src/integration/pipeline/README.md`](src/integration/pipeline/README.md)，請參考該文件取得更完整的架構說明。
 
-1. **IngestionTask**：從內建 HTTP server 取得 Edge 推理事件，正規化時間戳、過濾過期資料，並對每個攝影機只保留最新一筆事件。若設置 `INGESTION_HANDLER_CLASS`，可改用子專案自訂的 `BaseIngestionHandler` 實作。
-2. **MCMOTTask**：將事件交給追蹤 handler（預設為 `MCMOTEngine`）進行座標轉換、跨攝影機追蹤與 global ID 維護。可透過 `TRACKING_ENGINE_CLASS` 指定自訂 `BaseTrackingHandler`；啟用 `GLOBAL_MAP_VIS_*` 後，由 `GlobalMapRenderer` 根據地圖尺寸自動決定標記/字體大小、顏色與圖例，並可透過 `GLOBAL_MAP_VIS_CAMERAS` 聚焦特定 edge。詳細配置方式請參閱 [MC-MOT 模組 README](src/integration/mcmot/README.md)。
-3. **FormatConversionTask**：將 ingestion/MC-MOT 結果整理成統一 `rules_payload`，包含事件列表、追蹤/全域物件與統計摘要，為 downstream rules Task 提供穩定介面。可透過 `FORMAT_TASK_ENABLED` 關閉，或以 `FORMAT_STRATEGY_CLASS` 指定自訂格式引擎（例如 `project.rules.formatters:CustomFormatter`）。
-4. **RuleEvaluationTask + Rule Engine**：預留給違規檢查/作業判定等邏輯。`RuleEvaluationTask` 始終存在於 pipeline，但內部會透過 `RULES_ENGINE_CLASS` 載入子專案實作的 `BaseRuleEngine`，因此專案只需提供 engine 類（不必繼承 `BaseTask`）即可插入自訂規則流程。
+重點摘要如下：
 
-`InitPipelineTask` 在啟動時會依 `INGESTION_HANDLER_CLASS`、`TRACKING_ENGINE_CLASS`、`FORMAT_TASK_ENABLED`/`FORMAT_STRATEGY_CLASS` 決定要載入哪些 handler/策略；`RuleEvaluationTask` 也會讀取 `RULES_ENGINE_CLASS`，未設定則使用 `DefaultRuleEngine`。各 handler/engine 只需繼承對應的 `Base*` 介面並回傳結果（例如 rule engine 回傳 `RuleEngineResult`，可攜帶 `task_payload` 與 `context_updates`），Task 會將 payload 寫入 `TaskResult` 並套用 context 更新。如此每個子專案只需實作自己的 ingestion/tracking/format/rule engine 並在 `.env` 指定 class path，即可共用核心 pipeline 邏輯。
-
-預設的 `FormatConversionTask` 除了提供事件/追蹤統計外，還會將 MC-MOT 結果轉成 `expect_output` 結構（移植自 `transform_mcmot_to_expect_output.py`），放在 `rules_payload["expect_output"]`。若專案需要其他格式，可實作 `BaseFormatEngine` 子類並在 `.env` 透過 `FORMAT_STRATEGY_CLASS` 指定。
-
-以上節點由 `InitPipelineTask` 在啟動時建立並快取於 `TaskContext`，`PhaseTask` 則依工作時段切換執行哪個 pipeline。若需要 24/7 運作，只要在 `.env` 中把工作時段設為全天（例如 00:00~24:00）或維持預設的單一時段，即可讓系統始終執行 working pipeline。
+- Working pipeline 順序固定為 **Ingestion → MCMOT → (Format) → RuleEvaluation → EventDispatch**，所有自訂行為皆透過 handler/engine 插槽（`INGESTION_HANDLER_CLASS`、`TRACKING_ENGINE_CLASS`、`FORMAT_STRATEGY_CLASS`、`RULES_ENGINE_CLASS`、`EVENT_DISPATCH_ENGINE_CLASS`）注入。
+- 自訂 pipeline 可藉由 `PIPELINE_TASK_CLASSES` 註冊，selector（`PIPELINE_SELECTOR_CLASS`）只需回傳已註冊的名稱即可切換；預設 `WorkingHoursSelector` 永遠回傳 `working`。
+- 透過 `PIPELINE_SLEEP_SECONDS` 或 selector metadata 的 `sleep` 欄位可細緻控制各 pipeline 的 loop interval。若 selector/pipeline 未設定 `sleep`，Registry 中的預設值會交由 `PhaseTask` 套用。
+- selector 或 RuleEngine 若要輸出事件，可使用 `integration.pipeline.events.enqueue_event()` 推入 queue；`EventDispatchTask` 會統一呼叫對應的 dispatch engine 對外送出。
 
 MC-MOT 設定檔定義座標映射與匹配參數：
 

@@ -1,40 +1,31 @@
-"""Phase controller task switching working/non-working pipelines."""
+"""Phase controller task that delegates to registered pipelines via selector."""
 from __future__ import annotations
 
-from datetime import date
-
-from integration.pipeline.scheduler import PipelineScheduler
 from smart_workflow import BaseTask, TaskContext, TaskResult
-from integration.storage.state import ZoneStateRepository
+
+from integration.pipeline.registry import PipelineRegistry
+from integration.pipeline.selectors.base import BasePipelineSelector
 
 
 class PhaseTask(BaseTask):
     name = "phase_controller"
 
     def run(self, context: TaskContext) -> TaskResult:
-        scheduler: PipelineScheduler = context.require_resource("scheduler")
-        zone_repo: ZoneStateRepository = context.require_resource("zone_repo")
-        working_pipeline = context.require_resource("working_pipeline")
-        non_working_task = context.require_resource("non_working_task")
+        registry: PipelineRegistry = context.require_resource("pipeline_registry")
+        selector: BasePipelineSelector = context.require_resource("pipeline_selector")
 
-        phase = scheduler.current_phase()
-        context.monitor.heartbeat(phase=phase.name)
+        selection = selector.select(context)
+        entry = registry.get_entry(selection.name)
+        result = entry.task.execute(context)
 
-        if phase.is_working_hours:
-            working_pipeline.execute(context)
-            return TaskResult(status="working_phase", payload={"phase": phase.name})
+        payload = {}
+        if selection.metadata:
+            payload.update(selection.metadata)
+        if result and result.payload:
+            payload.update(result.payload)
 
-        today = date.today()
-        if zone_repo.is_zone_state_updated(today):
-            context.logger.info("非工作時段：今日已更新，暫停 %ss", context.config.non_working_idle_seconds)
-            return TaskResult(
-                status="non_working_idle",
-                payload={
-                    "phase": phase.name,
-                    "sleep": context.config.non_working_idle_seconds,
-                },
-            )
+        if "sleep" not in payload and entry.default_sleep is not None:
+            payload["sleep"] = entry.default_sleep
 
-        non_working_task.execute(context)
-        zone_repo.mark_zone_state_updated(today)
-        return TaskResult(status="non_working_phase", payload={"phase": phase.name})
+        status = result.status if result else f"{selection.name}_completed"
+        return TaskResult(status=status, payload=payload or None)
