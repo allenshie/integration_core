@@ -1,28 +1,11 @@
 """Integration pipeline composition and startup tasks."""
 from __future__ import annotations
 
-from typing import Iterable, List
+import os
 
 from smart_workflow import BaseTask, TaskContext, TaskResult, TaskError
 
-from integration.pipeline.tasks.non_working.update import NonWorkingUpdateTask
-from integration.pipeline.tasks.working.ingestion.task import IngestionTask
-from integration.pipeline.tasks.working.mc_mot.task import MCMOTTask
-from integration.pipeline.tasks.working.pipeline import WorkingPipelineTask
-from integration.pipeline.tasks.working.rules.task import RuleEvaluationTask
-from integration.pipeline.tasks.working.mc_mot.engine import MCMOTEngine
-from integration.mcmot.visualization.map_overlay import GlobalMapRenderer
-
-
-class WorkingPipeline:
-    """Sequential working-hours pipeline that reuses task instances."""
-
-    def __init__(self, nodes: Iterable[BaseTask]) -> None:
-        self._nodes: List[BaseTask] = list(nodes)
-
-    def execute(self, context: TaskContext) -> None:
-        for node in self._nodes:
-            node.execute(context)
+from integration.pipeline.schedule import load_pipeline_schedule, load_task_class
 
 
 class InitPipelineTask(BaseTask):
@@ -31,57 +14,74 @@ class InitPipelineTask(BaseTask):
     name = "integration-pipeline-init"
 
     def run(self, context: TaskContext) -> TaskResult:
-        if context.config.mcmot_enabled:
-            if context.config.mcmot is None:
-                raise TaskError("MC-MOT 已啟用但設定未載入")
-            engine = MCMOTEngine(config=context.config.mcmot, logger=context.logger)
-            context.set_resource("mcmot_engine", engine)
-            context.logger.info("MC-MOT engine initialized")
+        pipeline_registry = self._build_pipeline_registry(context)
+        context.set_resource("pipeline_registry", pipeline_registry)
+        if os.getenv("CONFIG_SUMMARY", "").strip().lower() in {"1", "true", "yes"}:
+            context.logger.info(self._format_pipeline_summary(pipeline_registry, context))
+        return TaskResult(status="pipeline_initialised", payload={"pipelines": list(pipeline_registry.keys())})
 
-            vis_cfg = getattr(context.config, "global_map_visualization", None)
-            if vis_cfg and vis_cfg.enabled:
-                map_cfg = context.config.mcmot.map
-                if map_cfg is None:
-                    context.logger.warning("啟用了全局可視化但 mcmot map 未設定")
-                else:
-                    renderer = GlobalMapRenderer(
-                        map_cfg=map_cfg,
-                        vis_cfg=vis_cfg,
-                        logger=context.logger,
-                        camera_configs=context.config.mcmot.cameras,
-                    )
-                    context.set_resource("global_map_renderer", renderer)
-                    context.logger.info("Global map renderer initialized")
-        else:
-            context.logger.info("MC-MOT disabled via configuration")
+    def _build_pipeline_registry(self, context: TaskContext) -> dict[str, BaseTask] | None:
+        schedule_path = getattr(context.config, "pipeline_schedule_path", None)
+        if not schedule_path:
+            raise TaskError("PIPELINE_SCHEDULE_PATH 未設定")
+        pipelines, phases = load_pipeline_schedule(schedule_path)
+        pipeline_instances: dict[str, BaseTask] = {}
+        for name, spec in pipelines.items():
+            if spec.enabled_env and os.getenv(spec.enabled_env, "").strip().lower() in {"0", "false", "no", "off"}:
+                continue
+            pipeline_cls = load_task_class(spec.class_path)
+            kwargs = dict(spec.kwargs)
+            if "context" not in kwargs:
+                try:
+                    pipeline = pipeline_cls(context=context, **kwargs)
+                except TypeError:
+                    pipeline = pipeline_cls(**kwargs)
+            else:
+                pipeline = pipeline_cls(**kwargs)
+            pipeline_instances[name] = pipeline
 
-        format_task = self._build_format_task(context)
-        rules_task = RuleEvaluationTask(context)
-        working_nodes = [
-            IngestionTask(context),
-            MCMOTTask(context),
-        ]
-        if format_task:
-            working_nodes.append(format_task)
-        working_nodes.append(rules_task)
-        working_pipeline = WorkingPipelineTask(nodes=working_nodes)
-        non_working_task = NonWorkingUpdateTask()
+        registry: dict[str, BaseTask] = {}
+        for phase_name, pipeline_name in phases.items():
+            pipeline = pipeline_instances.get(pipeline_name)
+            if not pipeline:
+                raise TaskError(f"phase {phase_name} 找不到 pipeline: {pipeline_name}")
+            registry[phase_name] = pipeline
+        return registry
 
-        context.set_resource("working_pipeline", working_pipeline)
-        context.set_resource("non_working_task", non_working_task)
-        return TaskResult(status="pipeline_initialised")
+    def _format_pipeline_summary(self, registry: dict[str, BaseTask], context: TaskContext) -> str:
+        lines = ["pipeline registry summary:"]
+        for phase, pipeline in registry.items():
+            pipeline_name = pipeline.__class__.__name__
+            nodes = self._describe_nodes(pipeline, context)
+            lines.append(f"- phase={phase} pipeline={pipeline_name}")
+            if nodes:
+                lines.append(f"  flow: {nodes}")
+        return "\n".join(lines)
 
-    def _build_format_task(self, context: TaskContext) -> BaseTask | None:
-        cfg = getattr(context.config, "format_task", None)
-        enabled = getattr(cfg, "enabled", True)
-        if not enabled:
-            context.logger.info("FORMAT_TASK_ENABLED=0，略過格式轉換節點")
-            return None
-        from integration.pipeline.tasks.working.formatting.task import FormatConversionTask  # local import to avoid optional cost
+    def _describe_nodes(self, pipeline: BaseTask, context: TaskContext) -> str:
+        nodes = []
+        pipeline_nodes = getattr(pipeline, "pipeline_nodes", None)
+        if pipeline_nodes is None:
+            pipeline_nodes = getattr(pipeline, "_nodes", None)
+        if not pipeline_nodes:
+            return ""
+        for node in pipeline_nodes:
+            nodes.append(self._describe_node(node, context))
+        return " -> ".join(nodes)
 
-        strategy = getattr(cfg, "strategy_class", None)
-        if strategy:
-            context.logger.info("使用格式轉換策略：%s", strategy)
-        else:
-            context.logger.info("使用預設格式轉換策略")
-        return FormatConversionTask(context)
+    def _describe_node(self, node: BaseTask, context: TaskContext) -> str:
+        parts = [node.__class__.__name__]
+        handler = getattr(node, "_handler", None)
+        if handler is not None:
+            parts.append(f"handler={handler.__class__.__name__}")
+        strategy = getattr(node, "_strategy", None)
+        if strategy is not None:
+            parts.append(f"strategy={strategy.__class__.__name__}")
+        engine = getattr(node, "_engine", None)
+        if engine is not None:
+            parts.append(f"engine={engine.__class__.__name__}")
+        if node.__class__.__name__ == "MCMOTTask":
+            mcmot_engine = context.get_resource("mcmot_engine")
+            if mcmot_engine is not None:
+                parts.append(f"engine={mcmot_engine.__class__.__name__}")
+        return f"{parts[0]}({', '.join(parts[1:])})" if len(parts) > 1 else parts[0]

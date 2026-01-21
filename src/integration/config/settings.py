@@ -30,6 +30,11 @@ def _env_csv(name: str) -> tuple[str, ...]:
     return tuple(part for part in parts if part)
 
 
+def _env_path(name: str) -> str | None:
+    raw = os.getenv(name)
+    return raw.strip() if raw and raw.strip() else None
+
+
 def _parse_hex_color(value: str | None) -> tuple[int, int, int] | None:
     if not value:
         return None
@@ -99,8 +104,18 @@ class IngestionTaskConfig:
 
 
 @dataclass
+class PhaseTaskConfig:
+    engine_class: str | None = os.getenv("PHASE_ENGINE_CLASS")
+
+
+@dataclass
 class TrackingTaskConfig:
     engine_class: str | None = os.getenv("TRACKING_ENGINE_CLASS")
+
+
+@dataclass
+class SchedulerConfig:
+    engine_class: str | None = os.getenv("SCHEDULER_ENGINE_CLASS")
 
 
 @dataclass
@@ -138,6 +153,7 @@ class AppConfig:
     edge_event_host: str = os.getenv("EDGE_EVENT_HOST", "0.0.0.0")
     edge_event_port: int = int(os.getenv("EDGE_EVENT_PORT", "9000"))
     edge_event_max_age_seconds: float = float(os.getenv("EDGE_EVENT_MAX_AGE", "5"))
+    pipeline_schedule_path: str | None = _env_path("PIPELINE_SCHEDULE_PATH")
     monitor_endpoint: str | None = os.getenv("MONITOR_ENDPOINT")
     monitor_service_name: str = (
         os.getenv("INTEGRATION_MONITOR_SERVICE_NAME")
@@ -153,6 +169,8 @@ class AppConfig:
     mcmot: Optional[MCMOTConfig] = field(default=None, repr=False)
     global_map_visualization: GlobalMapVisualizationConfig = field(default_factory=GlobalMapVisualizationConfig)
     ingestion_task: IngestionTaskConfig = field(default_factory=IngestionTaskConfig)
+    phase_task: PhaseTaskConfig = field(default_factory=PhaseTaskConfig)
+    scheduler: SchedulerConfig = field(default_factory=SchedulerConfig)
     tracking_task: TrackingTaskConfig = field(default_factory=TrackingTaskConfig)
     format_task: FormatTaskConfig = field(default_factory=FormatTaskConfig)
     rules: RulesConfig = field(default_factory=RulesConfig)
