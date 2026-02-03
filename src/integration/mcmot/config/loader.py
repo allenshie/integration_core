@@ -5,18 +5,18 @@ from pathlib import Path
 
 from integration.mcmot.config.manager import ConfigManager
 from integration.mcmot.config.schema import BaseConfig
-from integration.utils.paths import get_core_root
+from integration.utils.paths import get_config_root
 
 
 DEFAULT_CONFIG_RELATIVE_PATH = "data/config/mcmot.config.yaml"
 
 
 def resolve_config_path(raw_path: str | None) -> Path:
-    """Resolve a config path relative to the integration core root."""
+    """Resolve a config path relative to the config root."""
     path = Path(raw_path or DEFAULT_CONFIG_RELATIVE_PATH)
     if not path.is_absolute():
-        core_root = get_core_root()
-        path = (core_root / path).resolve()
+        config_root = get_config_root()
+        path = (config_root / path).resolve()
     return path
 
 

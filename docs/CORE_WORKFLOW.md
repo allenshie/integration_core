@@ -36,6 +36,34 @@ For `working` phase, the default pipeline is `MCMOTPipelineTask`, which runs:
 
 The workflow repeats every `LOOP_INTERVAL_SECONDS` seconds.
 
+## Pipeline Schedule
+
+`PIPELINE_SCHEDULE_PATH` 指向 `pipeline_schedule.json`，用於設定 phase 與 pipeline 的對應，
+並可針對每個 phase 設定節流頻率（`interval_seconds`）。
+
+### 範例
+
+```json
+{
+  "pipelines": {
+    "working": {
+      "class": "integration.pipeline.tasks.pipelines.mcmot_pipeline:MCMOTPipelineTask"
+    },
+    "warehouse_modeling": {
+      "class": "app.pipelines.warehouse_modeling:WarehouseModelingPipelineTask"
+    }
+  },
+  "phases": {
+    "working": { "pipeline": "working", "interval_seconds": 5 },
+    "non_working": { "pipeline": "warehouse_modeling", "interval_seconds": 300 }
+  }
+}
+```
+
+說明：
+- `phases.<name>.pipeline`：對應 `pipelines` 內的 pipeline 名稱。
+- `phases.<name>.interval_seconds`：節流秒數（可省略，省略時每次 loop 都會執行）。
+
 ## Related Settings
 
 - `PIPELINE_SCHEDULE_PATH`: required pipeline schedule JSON.

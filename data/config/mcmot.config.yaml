@@ -17,7 +17,7 @@ map:
   height_meters: 60.0
 
 cameras:
-  - camera_id: "camera1"
+  - camera_id: "camera_1"
     edge_id: "cam01"
     name: "Camera 1"
     enabled: true
@@ -25,7 +25,7 @@ cameras:
     ignore_polygons: "data/coordinate_models/ignore_polygons.npy"
     color_hex: "#228B22"
 
-  - camera_id: "camera2"
+  - camera_id: "camera_2"
     edge_id: "cam02"
     name: "Camera 2"
     enabled: true
@@ -33,18 +33,18 @@ cameras:
     ignore_polygons: "data/coordinate_models/ignore_polygons.npy"
     color_hex: "#4169E1"
 
-  - camera_id: "camera3"
-    edge_id: "edge_cam03"
+  - camera_id: "camera_3"
+    edge_id: "cam03"
     name: "Camera 3"
-    enabled: false
+    enabled: true
     coordinate_matrix_ckpt: "data/coordinate_models/cam3_tps_model.npz"
     ignore_polygons: "data/coordinate_models/ignore_polygons.npy"
     color_hex: "#DAA520"
 
-  - camera_id: "camera4"
-    edge_id: "edge_cam04"
+  - camera_id: "camera_4"
+    edge_id: "cam04"
     name: "Camera 4"
-    enabled: false
+    enabled: true
     coordinate_matrix_ckpt: "data/coordinate_models/cam4_tps_model.npz"
     ignore_polygons: "data/coordinate_models/ignore_polygons.npy"
     color_hex: "#6A5ACD"

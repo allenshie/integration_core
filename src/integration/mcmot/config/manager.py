@@ -1,26 +1,33 @@
 import yaml
 import json
+import os
 from pathlib import Path
 from typing import Dict, Any, Optional
 from integration.mcmot.config.schema import BaseConfig
-from integration.utils.paths import get_core_root
+from integration.utils.paths import get_config_root, get_core_root
 
 class ConfigManager:
     def __init__(self, config: Optional[str] = None):
+        import logging
+        self._logger = logging.getLogger(__name__)
         if config:
             self.config_path = Path(config)
         else:
-            core_root = get_core_root()
-            self.config_path = core_root / 'data' / 'config' / 'mcmot.config.yaml'
+            config_root = get_config_root()
+            self.config_path = config_root / 'data' / 'config' / 'mcmot.config.yaml'
 
         if not self.config_path:
             raise ValueError("Config 路徑未設定或無效")
 
-        self._base_dir = get_core_root()
+        self._base_dir = get_config_root()
+        self._registry_root = self._resolve_registry_root()
         raw_config = self._load_config(self.config_path)
         parsed_config = self._parse_cameras_config(raw_config)
+        parsed_config = self._apply_camera_registry(parsed_config)
         normalized_config = self._resolve_relative_paths(parsed_config)
         self.config = BaseConfig(**normalized_config)
+        for camera in self.config.cameras:
+            self._logger.info("mcmot camera=%s mapping=%s", camera.camera_id, camera.coordinate_matrix_ckpt)
 
     def _load_config(self, config_path: Path) -> Dict[str, Any]:
         """
@@ -71,6 +78,64 @@ class ConfigManager:
                 if value:
                     camera[key] = self._absolute_path(value)
         return config
+
+    def _apply_camera_registry(self, config: Dict[str, Any]) -> Dict[str, Any]:
+        registry = self._load_camera_registry()
+        if not registry:
+            return config
+        cameras = config.get("cameras") or []
+        for camera in cameras:
+            if not isinstance(camera, dict):
+                continue
+            camera_id = camera.get("camera_id")
+            if not camera_id:
+                continue
+            entry = self._match_registry_entry(registry, camera_id)
+            if not entry:
+                continue
+            mapping_file = entry.get("mapping", {}).get("file")
+            if mapping_file:
+                logger = getattr(self, "_logger", None)
+                if logger is None:
+                    import logging
+                    logger = logging.getLogger(__name__)
+                logger.info("mcmot 使用 registry mapping: %s", camera_id)
+                camera["coordinate_matrix_ckpt"] = self._resolve_registry_path(mapping_file)
+            ignore_polygons = entry.get("mcmot", {}).get("ignore_polygons")
+            if ignore_polygons:
+                camera["ignore_polygons"] = self._resolve_registry_path(ignore_polygons)
+        return config
+
+    def _load_camera_registry(self) -> Dict[str, Any]:
+        path = self._registry_root / "config" / "cameras.yaml"
+        if not path.exists():
+            return {}
+        with path.open("r", encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+        return data.get("cameras", {}) or {}
+
+    @staticmethod
+    def _match_registry_entry(registry: Dict[str, Any], camera_id: str) -> Dict[str, Any] | None:
+        direct = registry.get(camera_id)
+        if direct:
+            return direct
+        for _, entry in registry.items():
+            aliases = entry.get("aliases") or []
+            if camera_id in aliases:
+                return entry
+        return None
+
+    def _resolve_registry_root(self) -> Path:
+        root = os.environ.get("SMART_WAREHOUSE_ROOT")
+        if root:
+            return Path(root).expanduser().resolve()
+        return get_config_root()
+
+    def _resolve_registry_path(self, value: str) -> str:
+        path = Path(value)
+        if path.is_absolute():
+            return str(path)
+        return str((self._registry_root / path).resolve())
 
     def _absolute_path(self, value: str) -> str:
         path = Path(value)

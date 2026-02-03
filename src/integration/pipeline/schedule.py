@@ -10,7 +10,7 @@ from typing import Any, Dict, Tuple, Type
 
 from smart_workflow import BaseTask, TaskError
 
-from integration.utils.paths import get_core_root
+from integration.utils.paths import get_config_root
 
 
 @dataclass(frozen=True)
@@ -21,14 +21,35 @@ class PipelineSpec:
     enabled_env: str | None = None
 
 
+@dataclass(frozen=True)
+class PhasePolicy:
+    interval_seconds: float | None = None
+
+    @property
+    def enabled(self) -> bool:
+        return self.interval_seconds is not None and self.interval_seconds > 0
+
+    @property
+    def interval(self) -> float:
+        return self.interval_seconds or 0.0
+
+    def should_run(self, last_run_time: float, now: float) -> bool:
+        if not self.enabled:
+            return True
+        return (now - last_run_time) >= self.interval
+
+
 def resolve_schedule_path(raw_path: str | Path) -> Path:
+    """Resolve a schedule path relative to the config root."""
     path = Path(raw_path).expanduser()
     if not path.is_absolute():
-        path = (get_core_root() / path).resolve()
+        path = (get_config_root() / path).resolve()
     return path
 
 
-def load_pipeline_schedule(path: str | Path) -> Tuple[Dict[str, PipelineSpec], Dict[str, str]]:
+def load_pipeline_schedule(
+    path: str | Path,
+) -> Tuple[Dict[str, PipelineSpec], Dict[str, str], Dict[str, PhasePolicy]]:
     schedule_path = resolve_schedule_path(path)
     if not schedule_path.exists():
         raise TaskError(f"找不到 pipeline schedule：{schedule_path}")
@@ -42,6 +63,7 @@ def load_pipeline_schedule(path: str | Path) -> Tuple[Dict[str, PipelineSpec], D
 
     pipelines: Dict[str, PipelineSpec] = {}
     phases: Dict[str, str] = {}
+    phase_policies: Dict[str, PhasePolicy] = {}
 
     raw_pipelines = data.get("pipelines")
     raw_phases = data.get("phases")
@@ -56,12 +78,26 @@ def load_pipeline_schedule(path: str | Path) -> Tuple[Dict[str, PipelineSpec], D
         spec = _build_pipeline_spec(name, cfg)
         pipelines[spec.name] = spec
 
-    for phase_name, pipeline_name in raw_phases.items():
-        if not isinstance(pipeline_name, str):
-            raise TaskError(f"phase {phase_name} 必須指向 pipeline 名稱")
+    for phase_name, phase_cfg in raw_phases.items():
+        if isinstance(phase_cfg, str):
+            phases[phase_name] = phase_cfg
+            phase_policies[phase_name] = PhasePolicy()
+            continue
+        if not isinstance(phase_cfg, dict):
+            raise TaskError(f"phase {phase_name} 必須指向 pipeline 名稱或物件")
+        pipeline_name = phase_cfg.get("pipeline") or phase_cfg.get("pipeline_name")
+        if not pipeline_name or not isinstance(pipeline_name, str):
+            raise TaskError(f"phase {phase_name} 缺少 pipeline")
         phases[phase_name] = pipeline_name
+        interval_seconds = phase_cfg.get("interval_seconds")
+        if interval_seconds is None:
+            phase_policies[phase_name] = PhasePolicy()
+        elif isinstance(interval_seconds, (int, float)):
+            phase_policies[phase_name] = PhasePolicy(interval_seconds=float(interval_seconds))
+        else:
+            raise TaskError(f"phase {phase_name} interval_seconds 必須是數字")
 
-    return pipelines, phases
+    return pipelines, phases, phase_policies
 
 
 def load_task_class(path: str) -> Type[BaseTask]:

@@ -24,7 +24,7 @@ class InitPipelineTask(BaseTask):
         schedule_path = getattr(context.config, "pipeline_schedule_path", None)
         if not schedule_path:
             raise TaskError("PIPELINE_SCHEDULE_PATH 未設定")
-        pipelines, phases = load_pipeline_schedule(schedule_path)
+        pipelines, phases, phase_policies = load_pipeline_schedule(schedule_path)
         pipeline_instances: dict[str, BaseTask] = {}
         for name, spec in pipelines.items():
             if spec.enabled_env and os.getenv(spec.enabled_env, "").strip().lower() in {"0", "false", "no", "off"}:
@@ -46,6 +46,7 @@ class InitPipelineTask(BaseTask):
             if not pipeline:
                 raise TaskError(f"phase {phase_name} 找不到 pipeline: {pipeline_name}")
             registry[phase_name] = pipeline
+        context.set_resource("pipeline_policies", phase_policies)
         return registry
 
     def _format_pipeline_summary(self, registry: dict[str, BaseTask], context: TaskContext) -> str:

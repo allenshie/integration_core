@@ -48,7 +48,7 @@ def main() -> int:
         print("PIPELINE_SCHEDULE_PATH not set.")
         return 1
 
-    pipelines, phases = load_pipeline_schedule(config.pipeline_schedule_path)
+    pipelines, phases, _phase_policies = load_pipeline_schedule(config.pipeline_schedule_path)
 
     scheduler_engine = getattr(getattr(config, "scheduler", None), "engine_class", None)
     phase_engine = getattr(getattr(config, "phase_task", None), "engine_class", None)

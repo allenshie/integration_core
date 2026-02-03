@@ -59,8 +59,8 @@ class MCMOTPipelineTask(BaseTask):
             return path.rsplit(".", 1)[-1]
 
         ingestion_handler = _class_name(
-            getattr(getattr(config, "ingestion_task", None), "handler_class", None),
-            "DefaultIngestionHandler",
+            getattr(getattr(config, "ingestion_task", None), "engine_class", None),
+            "DefaultIngestionEngine",
         )
         tracking_handler = _class_name(
             getattr(getattr(config, "tracking_task", None), "engine_class", None),
@@ -76,7 +76,7 @@ class MCMOTPipelineTask(BaseTask):
         )
 
         return (
-            f"IngestionTask(handler={ingestion_handler}) -> "
+            f"IngestionTask(engine={ingestion_handler}) -> "
             f"MCMOTTask(handler={tracking_handler}, engine=MCMOTEngine) -> "
             f"FormatConversionTask(strategy={format_engine}) -> "
             f"RuleEvaluationTask(engine={rules_engine})"

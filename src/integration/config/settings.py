@@ -141,7 +141,7 @@ class FormatTaskConfig:
 
 @dataclass
 class IngestionTaskConfig:
-    handler_class: str | None = os.getenv("INGESTION_HANDLER_CLASS")
+    engine_class: str | None = os.getenv("INGESTION_ENGINE_CLASS")
 
 
 @dataclass
@@ -157,6 +157,18 @@ class TrackingTaskConfig:
 @dataclass
 class SchedulerConfig:
     engine_class: str | None = os.getenv("SCHEDULER_ENGINE_CLASS")
+
+
+@dataclass
+class MqttConfig:
+    enabled: bool = _env_bool("MQTT_ENABLED", False)
+    host: str = os.getenv("MQTT_HOST", "localhost")
+    port: int = int(os.getenv("MQTT_PORT", "1883"))
+    topic: str = os.getenv("PHASE_MQTT_TOPIC", "integration/phase")
+    qos: int = int(os.getenv("MQTT_QOS", "1"))
+    retain: bool = _env_bool("MQTT_RETAIN", True)
+    heartbeat_seconds: int = int(os.getenv("MQTT_HEARTBEAT_SECONDS", "600"))
+    client_id: str | None = os.getenv("MQTT_CLIENT_ID")
 
 
 @dataclass
@@ -206,6 +218,8 @@ class AppConfig:
     edge_event_host: str = os.getenv("EDGE_EVENT_HOST", "0.0.0.0")
     edge_event_port: int = int(os.getenv("EDGE_EVENT_PORT", "9000"))
     edge_event_max_age_seconds: float = float(os.getenv("EDGE_EVENT_MAX_AGE", "5"))
+    edge_event_backend: str = os.getenv("EDGE_EVENT_BACKEND", "http").strip().lower()
+    edge_event_topic: str = os.getenv("EDGE_EVENTS_MQTT_TOPIC", "edge/events").strip()
     pipeline_schedule_path: str | None = _env_path("PIPELINE_SCHEDULE_PATH")
     monitor_endpoint: str | None = os.getenv("MONITOR_ENDPOINT")
     monitor_service_name: str = (
@@ -215,6 +229,7 @@ class AppConfig:
     )
     log_level: str = os.getenv("LOG_LEVEL", "INFO")
     mcmot_enabled: bool = _env_bool("MCMOT_ENABLED", True)
+    mqtt: MqttConfig = field(default_factory=MqttConfig)
     mcmot_config_path: str = os.getenv(
         "MCMOT_CONFIG_PATH",
         "data/config/mcmot.config.yaml",
