@@ -5,7 +5,7 @@ import inspect
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from importlib import import_module
-from typing import Any, Dict, Type
+from typing import Any, Dict, List, Type
 
 from smart_workflow import TaskContext, TaskError
 
@@ -16,6 +16,7 @@ class RuleEngineResult:
 
     task_payload: Dict[str, Any] | None = None
     context_updates: Dict[str, Any] | None = None
+    events: List[Dict[str, Any]] | None = None
 
 
 class BaseRuleEngine(ABC):

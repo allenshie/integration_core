@@ -12,11 +12,13 @@ class MCMOTTask(BaseTask):
     name = "mc_mot"
 
     def __init__(self, context: TaskContext | None = None) -> None:
-        if context is not None:
-            self._ensure_engine(context)
-        self._handler = self._init_handler(context)
+        self._handler: BaseTrackingHandler | None = None
 
     def run(self, context: TaskContext) -> TaskResult:
+        if self._handler is None:
+            if context is not None:
+                self._ensure_engine(context)
+            self._handler = self._init_handler(context)
         events = context.get_resource("edge_events") or []
         if not context.config.mcmot_enabled:
             context.logger.info("MC-MOT 已停用，略過 %d 筆事件", len(events))

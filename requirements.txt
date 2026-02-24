@@ -11,3 +11,4 @@ torch>=2.3
 python-dotenv>=0.21.0
 paho-mqtt>=1.6.1
 git+https://github.com/allenshie/smart-workflow.git
+git+https://github.com/allenshie/smart_messaging_core.git

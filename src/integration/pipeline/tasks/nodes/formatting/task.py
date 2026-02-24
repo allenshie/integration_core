@@ -14,9 +14,11 @@ class FormatConversionTask(BaseTask):
     name = "format_conversion"
 
     def __init__(self, context: TaskContext | None = None) -> None:
-        self._strategy = self._init_strategy(context)
+        self._strategy: BaseFormatEngine | None = None
 
     def run(self, context: TaskContext) -> TaskResult:
+        if self._strategy is None:
+            self._strategy = self._init_strategy(context)
         events = context.get_resource("edge_events") or []
         tracked = context.get_resource("mc_mot_tracked") or []
         global_objects = context.get_resource("mc_mot_global_objects") or []

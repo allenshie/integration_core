@@ -126,6 +126,9 @@ class ConfigManager:
         return None
 
     def _resolve_registry_root(self) -> Path:
+        config_root = os.environ.get("CONFIG_ROOT")
+        if config_root:
+            return Path(config_root).expanduser().resolve()
         root = os.environ.get("SMART_WAREHOUSE_ROOT")
         if root:
             return Path(root).expanduser().resolve()

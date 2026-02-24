@@ -4,7 +4,22 @@ version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.10"
-dependencies = []
+dependencies = [
+    "opencv-python-headless>=4.10",
+    "numpy==1.26",
+    "shapely>=2.0",
+    "fastdtw>=0.3.4",
+    "pykalman>=0.9.5",
+    "loguru>=0.7",
+    "scipy>=1.11",
+    "pydantic>=2.0",
+    "PyYAML>=6.0",
+    "torch>=2.3",
+    "python-dotenv>=0.21.0",
+    "paho-mqtt>=1.6.1",
+    "smart-workflow @ git+https://github.com/allenshie/smart-workflow.git",
+    "smart-messaging-core @ git+https://github.com/allenshie/smart_messaging_core.git",
+]
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]

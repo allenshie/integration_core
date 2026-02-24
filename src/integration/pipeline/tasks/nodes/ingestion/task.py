@@ -10,13 +10,16 @@ class IngestionTask(BaseTask):
     name = "ingestion"
 
     def __init__(self, context: TaskContext | None = None) -> None:
-        self._engine = self._init_engine(context)
+        self._engine: BaseIngestionEngine | None = None
 
     def run(self, context: TaskContext) -> TaskResult:
+        if self._engine is None:
+            self._engine = self._init_engine(context)
         store = context.require_resource("edge_event_store")
         raw_events = store.pop_all()
         result = self._engine.process(context, raw_events)
         context.set_resource("edge_events", result.events)
+        context.set_resource("edge_events_latest", result.events)
         context.logger.info(
             "匯入 %d 台相機的最新事件（原始 %d 筆，丟棄 %d 筆）",
             len(result.events),

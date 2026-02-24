@@ -8,6 +8,7 @@ from smart_workflow import BaseTask, TaskContext, TaskResult
 from integration.pipeline.tasks.nodes.ingestion.task import IngestionTask
 from integration.pipeline.tasks.nodes.tracking.task import MCMOTTask
 from integration.pipeline.tasks.nodes.rules.task import RuleEvaluationTask
+from integration.pipeline.tasks.nodes.event_dispatch.task import EventDispatchTask
 
 class MCMOTPipelineTask(BaseTask):
     name = "mcmot_pipeline"
@@ -30,6 +31,7 @@ class MCMOTPipelineTask(BaseTask):
         if format_task:
             nodes.append(format_task)
         nodes.append(RuleEvaluationTask(context))
+        nodes.append(EventDispatchTask(context))
         return nodes
 
     def _build_format_task(self, context: TaskContext) -> BaseTask | None:
@@ -74,10 +76,15 @@ class MCMOTPipelineTask(BaseTask):
             getattr(getattr(config, "rules", None), "engine_class", None),
             "DefaultRuleEngine",
         )
+        dispatch_engine = _class_name(
+            getattr(getattr(config, "event_dispatch", None), "engine_class", None),
+            "DefaultEventDispatchEngine",
+        )
 
         return (
             f"IngestionTask(engine={ingestion_handler}) -> "
             f"MCMOTTask(handler={tracking_handler}, engine=MCMOTEngine) -> "
             f"FormatConversionTask(strategy={format_engine}) -> "
-            f"RuleEvaluationTask(engine={rules_engine})"
+            f"RuleEvaluationTask(engine={rules_engine}) -> "
+            f"EventDispatchTask(engine={dispatch_engine})"
         )
