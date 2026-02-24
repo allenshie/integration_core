@@ -4,10 +4,11 @@
 
 ## 文件
 
-- [Core Workflow（預設流程）](docs/CORE_WORKFLOW.md)
+- [核心工作流程（分層與客製化）](docs/CORE_WORKFLOW.md)
 - [環境變數說明（含協議範例）](docs/ENV.md)
-- [Pipeline Schedule 設定](docs/CORE_WORKFLOW.md#pipeline-schedule)
-- [Deployment Guide（Docker/K8s）](docs/DEPLOYMENT.md)
+- [Edge 通訊 Adapter 開發](docs/EDGE_COMM_ADAPTER.md)
+- [Pipeline 排程設定](docs/CORE_WORKFLOW.md)
+- [部署指南（Docker/K8s）](docs/DEPLOYMENT.md)
 - [MC-MOT 模組說明](src/integration/mcmot/README.md)
 
 ## 快速開始
@@ -17,7 +18,7 @@ cd integration
 cp .env.example .env
 uv venv --python /usr/bin/python3.10
 source .venv/bin/activate
-uv pip install -r requirements.txt
+uv pip install -e .
 python main.py
 ```
 
@@ -43,8 +44,9 @@ integration/
 
 ## 子專案使用
 
-若作為子模組導入，請確保 `integration/src` 在 `PYTHONPATH`，並於 `.env` 設定
-`CONFIG_ROOT`、`PIPELINE_SCHEDULE_PATH` 及需要的 plugin class path。
+若作為子模組導入，建議以套件方式安裝（`pip/uv install -e .`），避免手動設定
+`PYTHONPATH`。並於 `.env` 設定 `CONFIG_ROOT`、`PIPELINE_SCHEDULE_PATH` 及需要的
+plugin class path。
 
 ### 範例（主專案使用）
 
@@ -63,12 +65,11 @@ my_project/
 CONFIG_ROOT=/app/my_project
 PIPELINE_SCHEDULE_PATH=pipeline_schedule.json
 PHASE_ENGINE_CLASS=integration.pipeline.control.phase_engine:DebouncedPhaseEngine
-SCHEDULER_ENGINE_CLASS=app.schedulers.iron_gate:IronGateSchedulerEngine
+SCHEDULER_ENGINE_CLASS=smart_warehouse_app.app.schedulers.iron_gate:IronGateSchedulerEngine
 ```
 
-容器啟動時需確保 `integration/src` 可被 import，例如：
+容器啟動時可直接執行：
 
 ```
-export PYTHONPATH=/app/my_project/integration/src:$PYTHONPATH
 python /app/my_project/integration/main.py
 ```

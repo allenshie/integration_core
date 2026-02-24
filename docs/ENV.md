@@ -15,9 +15,12 @@
 ## Pipeline 插件
 
 - `INGESTION_ENGINE_CLASS`：Ingestion engine 類別路徑（`module:Class`）。
+- `INGESTION_HANDLER_CLASS`：舊鍵名（相容用途，建議改用 `INGESTION_ENGINE_CLASS`）。
 - `TRACKING_ENGINE_CLASS`：Tracking handler 類別路徑（`module:Class`）。
 - `FORMAT_STRATEGY_CLASS`：Format engine 類別路徑（`module:Class`）。
 - `RULES_ENGINE_CLASS`：Rule engine 類別路徑（`module:Class`）。
+- `EVENT_DISPATCH_ENGINE_CLASS`：事件派送 engine 類別路徑（`module:Class`）。
+- `PHASE_CHANGE_ENGINE_CLASS`：Phase 變更處理 engine 類別路徑（`module:Class`）。
 - `RULES_DETAIL`：字串。規則節點額外描述（僅 log）。
 
 ## MC-MOT
@@ -59,8 +62,15 @@
 - `PHASE_MQTT_TOPIC`：字串。工作階段發布 topic，預設 `integration/phase`。
 - `MQTT_QOS`：整數（0/1/2）。建議 `1`。
 - `MQTT_RETAIN`：`0/1`。是否保留最後狀態，建議 `1`。
-- `MQTT_HEARTBEAT_SECONDS`：整數秒。狀態心跳重送間隔，預設 `600`。
+- `PHASE_HEARTBEAT_SECONDS`：整數秒。狀態心跳重送間隔主鍵，預設 `600`。
+- `MQTT_HEARTBEAT_SECONDS`：舊鍵名（相容用途，當 `PHASE_HEARTBEAT_SECONDS` 未設定時使用）。
 - `MQTT_CLIENT_ID`：字串。MQTT client id（可選）。
+- `PHASE_PUBLISH_BACKEND`：`mqtt/http`。phase 廣播協議；未設定時預設跟隨 `EDGE_EVENT_BACKEND`。
+
+## Phase HTTP 廣播（可選）
+
+- `PHASE_HTTP_BASE_URL`：HTTP base URL（例如 `http://localhost:9001`）。
+- `PHASE_HTTP_TIMEOUT_SECONDS`：HTTP timeout 秒數，預設 `5`。
 
 ## 協議設定範例
 
@@ -73,7 +83,8 @@ MQTT_PORT=1883
 PHASE_MQTT_TOPIC=integration/phase
 MQTT_QOS=1
 MQTT_RETAIN=1
-MQTT_HEARTBEAT_SECONDS=600
+PHASE_HEARTBEAT_SECONDS=600
+PHASE_PUBLISH_BACKEND=mqtt
 ```
 
 ### edge events 接收（HTTP / MQTT）
@@ -83,13 +94,22 @@ MQTT_HEARTBEAT_SECONDS=600
 EDGE_EVENT_BACKEND=http
 EDGE_EVENT_HOST=0.0.0.0
 EDGE_EVENT_PORT=9000
+PHASE_PUBLISH_BACKEND=http
+PHASE_HTTP_BASE_URL=http://localhost:9001
 
 # MQTT 模式
 EDGE_EVENT_BACKEND=mqtt
 EDGE_EVENTS_MQTT_TOPIC=edge/events
 MQTT_HOST=localhost
 MQTT_PORT=1883
+PHASE_PUBLISH_BACKEND=mqtt
 ```
+
+預設建議：
+- `EDGE_EVENT_BACKEND` 與 `PHASE_PUBLISH_BACKEND` 使用相同協議，維持 edge 與 integration core 的通訊一致性。
+- 只有在特殊整合需求下才分離兩者協議。
+- integration core 會建立單一 edge 通訊 adapter，統一處理 ingestion 與 phase publish。
+- 若需新增協議，請參考 `docs/EDGE_COMM_ADAPTER.md`。
 
 ## 執行節奏
 

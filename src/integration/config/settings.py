@@ -35,6 +35,13 @@ def _env_path(name: str) -> str | None:
     return raw.strip() if raw and raw.strip() else None
 
 
+def _phase_publish_backend() -> str:
+    override = (os.getenv("PHASE_PUBLISH_BACKEND") or "").strip().lower()
+    if override:
+        return override
+    return (os.getenv("EDGE_EVENT_BACKEND") or "mqtt").strip().lower()
+
+
 def _parse_hex_color(value: str | None) -> tuple[int, int, int] | None:
     if not value:
         return None
@@ -141,7 +148,7 @@ class FormatTaskConfig:
 
 @dataclass
 class IngestionTaskConfig:
-    engine_class: str | None = os.getenv("INGESTION_ENGINE_CLASS")
+    engine_class: str | None = os.getenv("INGESTION_ENGINE_CLASS") or os.getenv("INGESTION_HANDLER_CLASS")
 
 
 @dataclass
@@ -167,8 +174,30 @@ class MqttConfig:
     topic: str = os.getenv("PHASE_MQTT_TOPIC", "integration/phase")
     qos: int = int(os.getenv("MQTT_QOS", "1"))
     retain: bool = _env_bool("MQTT_RETAIN", True)
-    heartbeat_seconds: int = int(os.getenv("MQTT_HEARTBEAT_SECONDS", "600"))
+    heartbeat_seconds: int = int(
+        os.getenv(
+            "PHASE_HEARTBEAT_SECONDS",
+            os.getenv("MQTT_HEARTBEAT_SECONDS", "600"),
+        )
+    )
     client_id: str | None = os.getenv("MQTT_CLIENT_ID")
+
+
+@dataclass
+class PhasePublishConfig:
+    backend: str = _phase_publish_backend()
+    heartbeat_seconds: int = int(
+        os.getenv(
+            "PHASE_HEARTBEAT_SECONDS",
+            os.getenv("MQTT_HEARTBEAT_SECONDS", "600"),
+        )
+    )
+
+
+@dataclass
+class PhaseHttpConfig:
+    base_url: str = (os.getenv("PHASE_HTTP_BASE_URL") or "").strip()
+    timeout_seconds: float = float(os.getenv("PHASE_HTTP_TIMEOUT_SECONDS", "5"))
 
 
 @dataclass
@@ -182,6 +211,10 @@ class RulesConfig:
 @dataclass
 class EventDispatchConfig:
     engine_class: str | None = os.getenv("EVENT_DISPATCH_ENGINE_CLASS")
+
+@dataclass
+class PhaseChangeConfig:
+    engine_class: str | None = os.getenv("PHASE_CHANGE_ENGINE_CLASS")
 
 
 @dataclass
@@ -230,6 +263,8 @@ class AppConfig:
     log_level: str = os.getenv("LOG_LEVEL", "INFO")
     mcmot_enabled: bool = _env_bool("MCMOT_ENABLED", True)
     mqtt: MqttConfig = field(default_factory=MqttConfig)
+    phase_publish: PhasePublishConfig = field(default_factory=PhasePublishConfig)
+    phase_http: PhaseHttpConfig = field(default_factory=PhaseHttpConfig)
     mcmot_config_path: str = os.getenv(
         "MCMOT_CONFIG_PATH",
         "data/config/mcmot.config.yaml",
@@ -243,6 +278,7 @@ class AppConfig:
     format_task: FormatTaskConfig = field(default_factory=FormatTaskConfig)
     rules: RulesConfig = field(default_factory=RulesConfig)
     event_dispatch: EventDispatchConfig = field(default_factory=EventDispatchConfig)
+    phase_change: PhaseChangeConfig = field(default_factory=PhaseChangeConfig)
     pipeline: PipelineManagerConfig = field(default_factory=PipelineManagerConfig)
 
 

@@ -4,7 +4,6 @@ from __future__ import annotations
 import logging
 import os
 import sys
-import threading
 from contextlib import suppress
 from pathlib import Path
 
@@ -29,8 +28,7 @@ set_core_root(CURRENT_DIR)
 
 from integration.config.settings import AppConfig, load_config
 from integration.api.event_store import EdgeEventStore
-from integration.api.http_server import start_edge_event_server
-from smart_messaging_core import MessagingClient, MessagingConfig, MqttConfig
+from integration.comm import build_edge_comm_adapter
 from integration.pipeline.pipeline import InitPipelineTask
 from integration.pipeline.control.scheduler import PipelineScheduler
 from integration.pipeline.control import PhaseTask
@@ -85,7 +83,7 @@ def run_daemon(config: AppConfig) -> None:
             config.pipeline_schedule_path,
         )
     store = context.require_resource("edge_event_store")
-    _start_edge_event_receiver(config, store)
+    _start_edge_event_receiver(config, context, store)
     workflow = build_workflow()
     runner = WorkflowRunner(
         context=context,
@@ -96,37 +94,18 @@ def run_daemon(config: AppConfig) -> None:
     runner.run()
 
 
-def _start_edge_event_receiver(config: AppConfig, store: EdgeEventStore) -> None:
-    backend = config.edge_event_backend
-    if backend == "mqtt":
-        mqtt_cfg = config.mqtt
-        client = MessagingClient(
-            MessagingConfig(
-                publish_backend="none",
-                subscribe_backend="mqtt",
-                mqtt=MqttConfig(
-                    host=mqtt_cfg.host,
-                    port=mqtt_cfg.port,
-                    qos=mqtt_cfg.qos,
-                    retain=False,
-                    client_id=mqtt_cfg.client_id,
-                ),
-            )
-        )
-
-        def _on_event(payload: dict) -> None:
-            store.add_event(payload)
-
-        try:
-            client.subscribe(config.edge_event_topic, _on_event)
-            LOGGER.info("edge events subscribed via MQTT topic=%s", config.edge_event_topic)
-        except Exception as exc:  # pylint: disable=broad-except
-            LOGGER.warning("MQTT subscribe failed; continue without broker: %s", exc)
-        return
-
-    server = start_edge_event_server(config.edge_event_host, config.edge_event_port, store)
-    server_thread = threading.Thread(target=server.serve_forever, daemon=True)
-    server_thread.start()
+def _start_edge_event_receiver(config: AppConfig, context: TaskContext, store: EdgeEventStore) -> None:
+    adapter = build_edge_comm_adapter(config, logger=LOGGER)
+    context.set_resource("edge_comm_adapter", adapter)
+    try:
+        adapter.start_event_ingestion(store.add_event)
+    except Exception as exc:  # pylint: disable=broad-except
+        LOGGER.warning("edge event ingestion start failed: %s", exc)
+    LOGGER.info(
+        "edge comm adapter ready (ingestion=%s, phase_publish=%s)",
+        config.edge_event_backend,
+        getattr(config.phase_publish, "backend", config.edge_event_backend),
+    )
 
 
 def main() -> int:
