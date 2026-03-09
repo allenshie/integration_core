@@ -29,6 +29,9 @@ class MqttPhasePublisher(BasePhasePublisher):
                         qos=cfg.qos,
                         retain=cfg.retain,
                         client_id=cfg.client_id,
+                        auth_enabled=cfg.auth_enabled,
+                        username=cfg.username,
+                        password=cfg.password,
                     ),
                 )
             )

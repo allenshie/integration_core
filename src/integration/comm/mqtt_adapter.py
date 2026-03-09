@@ -28,6 +28,9 @@ class MqttEdgeCommAdapter(EdgeCommAdapter):
                     qos=mqtt_cfg.qos,
                     retain=mqtt_cfg.retain,
                     client_id=mqtt_cfg.client_id,
+                    auth_enabled=mqtt_cfg.auth_enabled,
+                    username=mqtt_cfg.username,
+                    password=mqtt_cfg.password,
                 ),
             )
         )

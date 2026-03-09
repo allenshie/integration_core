@@ -32,7 +32,16 @@ from integration.comm import build_edge_comm_adapter
 from integration.pipeline.pipeline import InitPipelineTask
 from integration.pipeline.control.scheduler import PipelineScheduler
 from integration.pipeline.control import PhaseTask
-from smart_workflow import MonitoringClient, TaskContext, Workflow, WorkflowRunner
+from smart_workflow import (
+    HealthAwareWorkflowRunner,
+    HealthServer,
+    HealthState,
+    MonitoringClient,
+    ProbeConfig,
+    TaskContext,
+    Workflow,
+    WorkflowRunner,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -42,6 +51,12 @@ def setup_logging(level: str = "INFO") -> None:
         level=level_value,
         format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
     )
+
+
+def _to_bool(value: str | None, default: bool = False) -> bool:
+    if value is None:
+        return default
+    return value.strip().lower() not in {"0", "false", "no", "off"}
 
 
 def build_context(config: AppConfig) -> TaskContext:
@@ -85,13 +100,56 @@ def run_daemon(config: AppConfig) -> None:
     store = context.require_resource("edge_event_store")
     _start_edge_event_receiver(config, context, store)
     workflow = build_workflow()
-    runner = WorkflowRunner(
-        context=context,
-        workflow=workflow,
-        loop_interval=config.loop_interval_seconds,
-        retry_backoff=config.retry_backoff_seconds,
-    )
-    runner.run()
+    health_server: HealthServer | None = None
+    health_state: HealthState | None = None
+    health_enabled = _to_bool(os.getenv("INTEGRATION_HEALTH_SERVER_ENABLED"), False)
+    print()
+    if health_enabled:
+        health_state = HealthState()
+        context.set_resource("health_state", health_state)
+        health_server = HealthServer(
+            health_state=health_state,
+            host=os.environ.get("INTEGRATION_HEALTH_SERVER_HOST", "0.0.0.0"),
+            port=int(os.environ.get("INTEGRATION_HEALTH_SERVER_PORT", "8081")),
+            probe_config=ProbeConfig(
+                liveness_timeout_seconds=float(
+                    os.environ.get("INTEGRATION_HEALTH_LIVENESS_TIMEOUT_SECONDS", "30")
+                ),
+                readiness_timeout_seconds=float(
+                    os.environ.get("INTEGRATION_HEALTH_READINESS_TIMEOUT_SECONDS", "30")
+                ),
+                startup_grace_seconds=float(
+                    os.environ.get("INTEGRATION_HEALTH_STARTUP_GRACE_SECONDS", "10")
+                ),
+            ),
+        )
+        health_server.start()
+        LOGGER.info(
+            "health server started at %s:%s",
+            os.environ.get("INTEGRATION_HEALTH_SERVER_HOST", "0.0.0.0"),
+            os.environ.get("INTEGRATION_HEALTH_SERVER_PORT", "8081"),
+        )
+    if health_state is not None:
+        runner = HealthAwareWorkflowRunner(
+            context=context,
+            workflow=workflow,
+            loop_interval=config.loop_interval_seconds,
+            retry_backoff=config.retry_backoff_seconds,
+            health_state=health_state,
+        )
+    else:
+        runner = WorkflowRunner(
+            context=context,
+            workflow=workflow,
+            loop_interval=config.loop_interval_seconds,
+            retry_backoff=config.retry_backoff_seconds,
+        )
+
+    try:
+        runner.run()
+    finally:
+        if health_server is not None:
+            health_server.stop()
 
 
 def _start_edge_event_receiver(config: AppConfig, context: TaskContext, store: EdgeEventStore) -> None:

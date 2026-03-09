@@ -65,6 +65,9 @@
 - `PHASE_HEARTBEAT_SECONDS`：整數秒。狀態心跳重送間隔主鍵，預設 `600`。
 - `MQTT_HEARTBEAT_SECONDS`：舊鍵名（相容用途，當 `PHASE_HEARTBEAT_SECONDS` 未設定時使用）。
 - `MQTT_CLIENT_ID`：字串。MQTT client id（可選）。
+- `MQTT_AUTH_ENABLED`：`0/1`。是否啟用 MQTT 帳密驗證（預設 `0`）。
+- `MQTT_USERNAME`：字串。MQTT 使用者名稱（`MQTT_AUTH_ENABLED=1` 時必填）。
+- `MQTT_PASSWORD`：字串。MQTT 密碼（建議透過 Secret 或 env 注入）。
 - `PHASE_PUBLISH_BACKEND`：`mqtt/http`。phase 廣播協議；未設定時預設跟隨 `EDGE_EVENT_BACKEND`。
 
 ## Phase HTTP 廣播（可選）
@@ -83,6 +86,9 @@ MQTT_PORT=1883
 PHASE_MQTT_TOPIC=integration/phase
 MQTT_QOS=1
 MQTT_RETAIN=1
+MQTT_AUTH_ENABLED=1
+MQTT_USERNAME=allen
+MQTT_PASSWORD=allen
 PHASE_HEARTBEAT_SECONDS=600
 PHASE_PUBLISH_BACKEND=mqtt
 ```
@@ -102,6 +108,9 @@ EDGE_EVENT_BACKEND=mqtt
 EDGE_EVENTS_MQTT_TOPIC=edge/events
 MQTT_HOST=localhost
 MQTT_PORT=1883
+MQTT_AUTH_ENABLED=1
+MQTT_USERNAME=allen
+MQTT_PASSWORD=allen
 PHASE_PUBLISH_BACKEND=mqtt
 ```
 
@@ -118,6 +127,20 @@ PHASE_PUBLISH_BACKEND=mqtt
 - `CONFIG_SUMMARY`：`0/1`。啟動時輸出配置摘要（engine/pipeline 設定）。
 - `PIPELINE_SCHEDULE_PATH`：pipeline schedule 設定檔路徑。格式與範例請見 `docs/CORE_WORKFLOW.md`。
 - `CONFIG_ROOT`：相對路徑解析基準（建議設為主專案根目錄）；未設定時回退到 integration root。
+
+## 健康檢查（K8s Probe）
+
+- `INTEGRATION_HEALTH_SERVER_ENABLED`：`0/1`。是否啟用健康檢查 HTTP server（預設 `0`）。
+- `INTEGRATION_HEALTH_SERVER_HOST`：健康檢查服務 host（預設 `0.0.0.0`）。
+- `INTEGRATION_HEALTH_SERVER_PORT`：健康檢查服務 port（預設 `8081`）。
+- `INTEGRATION_HEALTH_LIVENESS_TIMEOUT_SECONDS`：`/healthz` loop 心跳逾時秒數（預設 `30`）。
+- `INTEGRATION_HEALTH_READINESS_TIMEOUT_SECONDS`：`/readyz` 最近進度逾時秒數（預設 `30`）。
+- `INTEGRATION_HEALTH_STARTUP_GRACE_SECONDS`：startup 完成後首次 loop/progress 寬限秒數（預設 `10`）。
+
+啟用後提供：
+- `GET /startupz`
+- `GET /healthz`
+- `GET /readyz`
 
 ## Iron Gate Scheduler（專案插件）
 

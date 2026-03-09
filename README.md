@@ -73,3 +73,19 @@ SCHEDULER_ENGINE_CLASS=smart_warehouse_app.app.schedulers.iron_gate:IronGateSche
 ```
 python /app/my_project/integration/main.py
 ```
+
+## 健康檢查（可選）
+
+可透過環境變數啟用內建 probe 端點（適用 Kubernetes）：
+
+```
+INTEGRATION_HEALTH_SERVER_ENABLED=1
+INTEGRATION_HEALTH_SERVER_HOST=0.0.0.0
+INTEGRATION_HEALTH_SERVER_PORT=8081
+```
+
+啟用後提供：
+
+- `GET /startupz`
+- `GET /healthz`
+- `GET /readyz`

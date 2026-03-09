@@ -174,6 +174,9 @@ class MqttConfig:
     topic: str = os.getenv("PHASE_MQTT_TOPIC", "integration/phase")
     qos: int = int(os.getenv("MQTT_QOS", "1"))
     retain: bool = _env_bool("MQTT_RETAIN", True)
+    auth_enabled: bool = _env_bool("MQTT_AUTH_ENABLED", False)
+    username: str | None = os.getenv("MQTT_USERNAME")
+    password: str | None = os.getenv("MQTT_PASSWORD")
     heartbeat_seconds: int = int(
         os.getenv(
             "PHASE_HEARTBEAT_SECONDS",
