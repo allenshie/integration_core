@@ -91,6 +91,7 @@ class CameraConfig(BaseModel):
 
     camera_id: str = Field(..., description="整合端使用的攝影機識別")
     edge_id: Optional[str] = Field(default=None, description="edge 事件中的 camera_id，預設與 camera_id 相同")
+    source_id: Optional[str] = Field(default=None, description="事件通報 payload 使用的對外 camera_id，預設與 camera_id 相同")
     name: str = Field(default="", description="攝影機名稱（可選）")
     zone_id: Optional[str] = Field(default=None, description="對應倉儲區域識別（可選）")
     enabled: bool = Field(default=True, description="是否啟用此攝影機")
@@ -111,6 +112,16 @@ class CameraConfig(BaseModel):
         if not value.strip():
             raise ValueError("座標轉換矩陣檔案路徑不能為空")
         return value.strip()
+
+    @field_validator("source_id")
+    @classmethod
+    def validate_source_id(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return value
+        cleaned = value.strip()
+        if not cleaned:
+            return None
+        return cleaned
 
     @field_validator("color_hex")
     @classmethod
@@ -153,6 +164,8 @@ class BaseConfig(BaseModel):
         for camera in self.cameras:
             if not camera.edge_id:
                 camera.edge_id = camera.camera_id
+            if not camera.source_id:
+                camera.source_id = camera.camera_id
         return self
 
     def get_enabled_camera(self) -> List[CameraConfig]:

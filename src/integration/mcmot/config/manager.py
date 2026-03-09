@@ -104,6 +104,9 @@ class ConfigManager:
             ignore_polygons = entry.get("mcmot", {}).get("ignore_polygons")
             if ignore_polygons:
                 camera["ignore_polygons"] = self._resolve_registry_path(ignore_polygons)
+            source_id = entry.get("source_id")
+            if isinstance(source_id, str) and source_id.strip():
+                camera["source_id"] = source_id.strip()
         return config
 
     def _load_camera_registry(self) -> Dict[str, Any]:
