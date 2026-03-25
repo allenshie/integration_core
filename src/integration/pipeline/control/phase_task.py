@@ -47,7 +47,7 @@ class PhaseTask(BaseTask):
             
         # 3) 回報 heartbeat、必要時推播 phase 變更
         context.monitor.heartbeat(phase=phase.name)
-        publish_cfg = getattr(context.config, "phase_publish", None)
+        publish_cfg = getattr(context.config, "phase_messaging", None)
         publish_backend = (getattr(publish_cfg, "backend", None) or "mqtt").strip().lower()
         heartbeat_seconds = getattr(publish_cfg, "heartbeat_seconds", 0) if publish_cfg else 0
         changed, heartbeat_due = self._phase_change_flags(
@@ -170,13 +170,16 @@ class PhaseTask(BaseTask):
         if not changed and not heartbeat_due:
             return
 
-        edge_comm_adapter = context.get_resource("edge_comm_adapter")
-        if edge_comm_adapter is None:
-            context.logger.warning("phase publish skipped: edge_comm_adapter not ready")
+        messaging = context.get_resource("messaging_client")
+        if messaging is None:
+            context.logger.warning("phase publish skipped: messaging_client not ready")
             return
 
         try:
-            published = edge_comm_adapter.publish_phase(phase_name, time.time())
+            published = messaging.publish(
+                "phase_publish",
+                {"phase": phase_name, "timestamp": now},
+            )
         except Exception as exc:  # pylint: disable=broad-except
             context.logger.warning("phase publish skipped (backend=%s): %s", publish_backend, exc)
             return

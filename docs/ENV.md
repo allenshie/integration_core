@@ -48,29 +48,28 @@
 - `GLOBAL_MAP_VIS_GLOBAL_RADIUS_RATIO`：浮點數。
 - `GLOBAL_MAP_VIS_LOCAL_RADIUS_RATIO`：浮點數。
 
-## Edge 事件
+## 通訊用途參數
 
-- `EDGE_EVENT_MAX_AGE`：整數秒。超過此秒數的事件會被丟棄。
 - `EDGE_EVENT_BACKEND`：`http` 或 `mqtt`。預設 `http`。
-- `EDGE_EVENTS_MQTT_TOPIC`：字串。MQTT 模式下使用的 topic，預設 `edge/events`。
+- `EDGE_EVENTS_TOPIC`：edge 事件通道名稱。預設 `edge/events`。
+- `PHASE_PUBLISH_BACKEND`：`mqtt/http`。phase 廣播協議；未設定時預設跟隨 `EDGE_EVENT_BACKEND`。
+- `PHASE_TOPIC`：phase 廣播通道名稱。預設 `integration/phase`。
+- `EDGE_EVENT_MAX_AGE`：整數秒。超過此秒數的事件會被丟棄。
 
-## MQTT 廣播
+## MQTT 協議參數
 
-- `MQTT_ENABLED`：`0/1`。是否啟用 MQTT 發佈工作階段。
+- `MQTT_ENABLED`：`0/1`。是否啟用 MQTT 能力。
 - `MQTT_HOST`：字串。MQTT broker host，預設 `localhost`。
 - `MQTT_PORT`：整數。MQTT broker port，預設 `1883`。
-- `PHASE_MQTT_TOPIC`：字串。工作階段發布 topic，預設 `integration/phase`。
 - `MQTT_QOS`：整數（0/1/2）。建議 `1`。
 - `MQTT_RETAIN`：`0/1`。是否保留最後狀態，建議 `1`。
 - `PHASE_HEARTBEAT_SECONDS`：整數秒。狀態心跳重送間隔主鍵，預設 `600`。
-- `MQTT_HEARTBEAT_SECONDS`：舊鍵名（相容用途，當 `PHASE_HEARTBEAT_SECONDS` 未設定時使用）。
 - `MQTT_CLIENT_ID`：字串。MQTT client id（可選）。
 - `MQTT_AUTH_ENABLED`：`0/1`。是否啟用 MQTT 帳密驗證（預設 `0`）。
 - `MQTT_USERNAME`：字串。MQTT 使用者名稱（`MQTT_AUTH_ENABLED=1` 時必填）。
 - `MQTT_PASSWORD`：字串。MQTT 密碼（建議透過 Secret 或 env 注入）。
-- `PHASE_PUBLISH_BACKEND`：`mqtt/http`。phase 廣播協議；未設定時預設跟隨 `EDGE_EVENT_BACKEND`。
 
-## Phase HTTP 廣播（可選）
+## HTTP 協議參數
 
 - `PHASE_HTTP_BASE_URL`：HTTP base URL（例如 `http://localhost:9001`）。
 - `PHASE_HTTP_TIMEOUT_SECONDS`：HTTP timeout 秒數，預設 `5`。
@@ -83,7 +82,7 @@
 MQTT_ENABLED=1
 MQTT_HOST=localhost
 MQTT_PORT=1883
-PHASE_MQTT_TOPIC=integration/phase
+PHASE_TOPIC=integration/phase
 MQTT_QOS=1
 MQTT_RETAIN=1
 MQTT_AUTH_ENABLED=1
@@ -105,20 +104,21 @@ PHASE_HTTP_BASE_URL=http://localhost:9001
 
 # MQTT 模式
 EDGE_EVENT_BACKEND=mqtt
-EDGE_EVENTS_MQTT_TOPIC=edge/events
+EDGE_EVENTS_TOPIC=edge/events
 MQTT_HOST=localhost
 MQTT_PORT=1883
 MQTT_AUTH_ENABLED=1
 MQTT_USERNAME=allen
 MQTT_PASSWORD=allen
 PHASE_PUBLISH_BACKEND=mqtt
+PHASE_TOPIC=integration/phase
 ```
 
 預設建議：
 - `EDGE_EVENT_BACKEND` 與 `PHASE_PUBLISH_BACKEND` 使用相同協議，維持 edge 與 integration core 的通訊一致性。
 - 只有在特殊整合需求下才分離兩者協議。
-- integration core 會建立單一 edge 通訊 adapter，統一處理 ingestion 與 phase publish。
-- 若需新增協議，請參考 `docs/EDGE_COMM_ADAPTER.md`。
+- integration core 會根據用途參數與協議參數組裝對應的 messaging 設定。
+- 若需新增協議，請參考 `smart_messaging_core` 的協議文件與 route 設計。
 
 ## 執行節奏
 

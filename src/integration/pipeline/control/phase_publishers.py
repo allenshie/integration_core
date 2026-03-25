@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
-from smart_messaging_core import HttpConfig, MessagingClient, MessagingConfig, MqttConfig
+from smart_messaging_core import HttpConfig, MessagingClient, MessagingConfig, MqttConfig, RouteConfig
 from smart_workflow import TaskError
 
 
@@ -15,14 +15,12 @@ class BasePhasePublisher(ABC):
 
 class MqttPhasePublisher(BasePhasePublisher):
     def __init__(self, cfg, client: MessagingClient | None = None) -> None:
-        self._topic = cfg.topic
+        self._topic = getattr(cfg, "topic", None) or getattr(cfg, "channel", "integration/phase")
         if client is not None:
             self._client = client
         else:
             self._client = MessagingClient(
                 MessagingConfig(
-                    publish_backend="mqtt",
-                    subscribe_backend="none",
                     mqtt=MqttConfig(
                         host=cfg.host,
                         port=cfg.port,
@@ -33,36 +31,39 @@ class MqttPhasePublisher(BasePhasePublisher):
                         username=cfg.username,
                         password=cfg.password,
                     ),
+                    routes={
+                        "phase_publish": RouteConfig(backend="mqtt", channel=self._topic),
+                    },
                 )
             )
 
     def publish(self, phase_name: str, timestamp: float) -> bool:
-        return self._client.publish(self._topic, {"phase": phase_name, "timestamp": timestamp})
+        return self._client.publish("phase_publish", {"phase": phase_name, "timestamp": timestamp})
 
 
 class HttpPhasePublisher(BasePhasePublisher):
     def __init__(self, http_cfg, topic: str) -> None:
         if not http_cfg or not http_cfg.base_url:
             raise TaskError("PHASE_HTTP_BASE_URL 未設定，無法使用 http 廣播")
-        self._topic = topic
         self._client = MessagingClient(
             MessagingConfig(
-                publish_backend="http",
-                subscribe_backend="none",
                 http=HttpConfig(
                     base_url=http_cfg.base_url,
                     timeout_seconds=http_cfg.timeout_seconds,
                 ),
+                routes={
+                    "phase_publish": RouteConfig(backend="http", channel=topic),
+                },
             )
         )
 
     def publish(self, phase_name: str, timestamp: float) -> bool:
-        return self._client.publish(self._topic, {"phase": phase_name, "timestamp": timestamp})
+        return self._client.publish("phase_publish", {"phase": phase_name, "timestamp": timestamp})
 
 
 class PhasePublisherRegistry:
     def __init__(self, cfg, http_cfg, logger=None, mqtt_client: MessagingClient | None = None) -> None:
-        self._topic = cfg.topic if cfg else None
+        self._topic = (getattr(cfg, "topic", None) or getattr(cfg, "channel", None)) if cfg else None
         self._publishers: dict[str, BasePhasePublisher] = {}
         self._missing: dict[str, str] = {}
         self._logger = logger

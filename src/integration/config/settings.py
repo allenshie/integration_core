@@ -121,6 +121,22 @@ def _env_pipeline_sleep() -> Dict[str, float]:
     return result
 
 
+def _edge_events_topic() -> str:
+    return (
+        os.getenv("EDGE_EVENTS_TOPIC")
+        or os.getenv("EDGE_EVENTS_MQTT_TOPIC")
+        or "edge/events"
+    ).strip()
+
+
+def _phase_topic() -> str:
+    return (
+        os.getenv("PHASE_TOPIC")
+        or os.getenv("PHASE_MQTT_TOPIC")
+        or "integration/phase"
+    ).strip()
+
+
 @dataclass
 class GlobalMapVisualizationConfig:
     enabled: bool = _env_bool("GLOBAL_MAP_VIS_ENABLED", False)
@@ -171,30 +187,29 @@ class MqttConfig:
     enabled: bool = _env_bool("MQTT_ENABLED", False)
     host: str = os.getenv("MQTT_HOST", "localhost")
     port: int = int(os.getenv("MQTT_PORT", "1883"))
-    topic: str = os.getenv("PHASE_MQTT_TOPIC", "integration/phase")
     qos: int = int(os.getenv("MQTT_QOS", "1"))
     retain: bool = _env_bool("MQTT_RETAIN", True)
     auth_enabled: bool = _env_bool("MQTT_AUTH_ENABLED", False)
     username: str | None = os.getenv("MQTT_USERNAME")
     password: str | None = os.getenv("MQTT_PASSWORD")
-    heartbeat_seconds: int = int(
-        os.getenv(
-            "PHASE_HEARTBEAT_SECONDS",
-            os.getenv("MQTT_HEARTBEAT_SECONDS", "600"),
-        )
-    )
+    heartbeat_seconds: int = int(os.getenv("PHASE_HEARTBEAT_SECONDS", "600"))
     client_id: str | None = os.getenv("MQTT_CLIENT_ID")
 
 
 @dataclass
-class PhasePublishConfig:
+class EdgeEventMessagingConfig:
+    backend: str = os.getenv("EDGE_EVENT_BACKEND", "http").strip().lower()
+    channel: str = _edge_events_topic()
+    host: str = os.getenv("EDGE_EVENT_HOST", "0.0.0.0")
+    port: int = int(os.getenv("EDGE_EVENT_PORT", "9000"))
+    max_age_seconds: float = float(os.getenv("EDGE_EVENT_MAX_AGE", "5"))
+
+
+@dataclass
+class PhaseMessagingConfig:
     backend: str = _phase_publish_backend()
-    heartbeat_seconds: int = int(
-        os.getenv(
-            "PHASE_HEARTBEAT_SECONDS",
-            os.getenv("MQTT_HEARTBEAT_SECONDS", "600"),
-        )
-    )
+    channel: str = _phase_topic()
+    heartbeat_seconds: int = int(os.getenv("PHASE_HEARTBEAT_SECONDS", "600"))
 
 
 @dataclass
@@ -214,6 +229,7 @@ class RulesConfig:
 @dataclass
 class EventDispatchConfig:
     engine_class: str | None = os.getenv("EVENT_DISPATCH_ENGINE_CLASS")
+
 
 @dataclass
 class PhaseChangeConfig:
@@ -254,8 +270,6 @@ class AppConfig:
     edge_event_host: str = os.getenv("EDGE_EVENT_HOST", "0.0.0.0")
     edge_event_port: int = int(os.getenv("EDGE_EVENT_PORT", "9000"))
     edge_event_max_age_seconds: float = float(os.getenv("EDGE_EVENT_MAX_AGE", "5"))
-    edge_event_backend: str = os.getenv("EDGE_EVENT_BACKEND", "http").strip().lower()
-    edge_event_topic: str = os.getenv("EDGE_EVENTS_MQTT_TOPIC", "edge/events").strip()
     pipeline_schedule_path: str | None = _env_path("PIPELINE_SCHEDULE_PATH")
     monitor_endpoint: str | None = os.getenv("MONITOR_ENDPOINT")
     monitor_service_name: str = (
@@ -266,7 +280,8 @@ class AppConfig:
     log_level: str = os.getenv("LOG_LEVEL", "INFO")
     mcmot_enabled: bool = _env_bool("MCMOT_ENABLED", True)
     mqtt: MqttConfig = field(default_factory=MqttConfig)
-    phase_publish: PhasePublishConfig = field(default_factory=PhasePublishConfig)
+    edge_events: EdgeEventMessagingConfig = field(default_factory=EdgeEventMessagingConfig)
+    phase_messaging: PhaseMessagingConfig = field(default_factory=PhaseMessagingConfig)
     phase_http: PhaseHttpConfig = field(default_factory=PhaseHttpConfig)
     mcmot_config_path: str = os.getenv(
         "MCMOT_CONFIG_PATH",
@@ -283,6 +298,18 @@ class AppConfig:
     event_dispatch: EventDispatchConfig = field(default_factory=EventDispatchConfig)
     phase_change: PhaseChangeConfig = field(default_factory=PhaseChangeConfig)
     pipeline: PipelineManagerConfig = field(default_factory=PipelineManagerConfig)
+
+    @property
+    def edge_event_backend(self) -> str:
+        return self.edge_events.backend
+
+    @property
+    def edge_event_topic(self) -> str:
+        return self.edge_events.channel
+
+    @property
+    def phase_publish(self) -> PhaseMessagingConfig:
+        return self.phase_messaging
 
 
 def load_config() -> AppConfig:
@@ -303,6 +330,9 @@ def load_config() -> AppConfig:
 
     config = AppConfig(timezone=tz)
     config.log_level = config.log_level.upper()
+    config.edge_event_host = config.edge_events.host
+    config.edge_event_port = config.edge_events.port
+    config.edge_event_max_age_seconds = config.edge_events.max_age_seconds
     if config.mcmot_enabled:
         config.mcmot = load_mcmot_config(config.mcmot_config_path)
     return config

@@ -36,10 +36,20 @@ class DefaultIngestionEngine(BaseIngestionEngine):
 
     def __init__(self, context: TaskContext | None = None) -> None:
         super().__init__(context)
-        self._max_age_seconds = context.config.edge_event_max_age_seconds if context else None
+        if context is None:
+            self._max_age_seconds = None
+        else:
+            edge_cfg = getattr(context.config, "edge_events", None)
+            self._max_age_seconds = getattr(edge_cfg, "max_age_seconds", None)
+            if self._max_age_seconds is None:
+                self._max_age_seconds = getattr(context.config, "edge_event_max_age_seconds", None)
 
     def process(self, context: TaskContext, raw_events: List[Dict[str, Any]]) -> IngestionResult:
-        max_age_seconds = self._max_age_seconds or context.config.edge_event_max_age_seconds
+        edge_cfg = getattr(context.config, "edge_events", None)
+        configured_max_age = getattr(edge_cfg, "max_age_seconds", None)
+        if configured_max_age is None:
+            configured_max_age = getattr(context.config, "edge_event_max_age_seconds", 5)
+        max_age_seconds = self._max_age_seconds or configured_max_age
         max_age = timedelta(seconds=max_age_seconds)
         now = datetime.now(timezone.utc)
 

@@ -1,6 +1,5 @@
-"""Edge communication adapters for ingestion + phase publish."""
+"""Communication helpers for edge event ingestion and phase publish."""
 
-from .base import EdgeCommAdapter
-from .factory import build_edge_comm_adapter
+from .messaging import build_messaging_client
 
-__all__ = ["EdgeCommAdapter", "build_edge_comm_adapter"]
+__all__ = ["build_messaging_client"]
