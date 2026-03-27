@@ -6,7 +6,12 @@ from contextlib import suppress
 from integration.comm import build_messaging_client
 
 
-def init_messaging_client(config, context, logger) -> None:
+def init_messaging_client(config, context, logger):
+    messaging = context.get_resource("messaging_client")
+    if messaging is not None:
+        logger.info("messaging client ready (reused from context)")
+        return messaging
+
     messaging = build_messaging_client(config)
     context.set_resource("messaging_client", messaging)
     edge_backend = getattr(getattr(config, "edge_events", None), "backend", "mqtt")
@@ -16,6 +21,7 @@ def init_messaging_client(config, context, logger) -> None:
         edge_backend,
         phase_backend,
     )
+    return messaging
 
 
 def start_edge_event_receiver(config, context, store, logger) -> None:
