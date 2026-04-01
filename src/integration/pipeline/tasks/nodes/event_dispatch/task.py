@@ -34,7 +34,11 @@ class EventDispatchTask(BaseTask):
                     raise TaskError(f"event missing field: {key}")
 
         result = self._engine.dispatch(events, context)
-        payload = {"dispatched": result.dispatched, "failed": result.failed}
+        payload = {
+            "dispatched": result.dispatched,
+            "skipped": result.skipped,
+            "failed": result.failed,
+        }
         if result.details:
             payload["details"] = result.details
         return TaskResult(status="event_dispatch_done", payload=payload)

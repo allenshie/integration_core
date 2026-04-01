@@ -54,6 +54,25 @@
 - `Workflow/Task`：編排與流程控制。
 - `Engine`：可替換的實作邏輯（插件化擴充點）。
 
+## 補充：FormatConversionTask 的角色
+
+在正式的 MC-MOT 流程中，`FormatConversionTask` 位於 `MCMOTTask` 與
+`RuleEvaluationTask` 之間：
+
+`IngestionTask -> MCMOTTask -> FormatConversionTask -> RuleEvaluationTask -> EventDispatchTask`
+
+它的責任不是做規則判斷，而是把 tracking / edge event 的輸出整理成規則引擎可直接
+消費的 `rules_payload`。
+
+常見輸出包含：
+- `overall_metadata`
+- `mcmot_data`
+- `camera_data`
+- `object_id_mapping`
+
+不同場域若對 `overall_metadata` 或 schema 有額外要求，應優先考慮替換
+`FORMAT_STRATEGY_CLASS`，而非把資料修補邏輯放進規則引擎。
+
 ## Pipeline 排程設定
 
 `PIPELINE_SCHEDULE_PATH` 指向 `pipeline_schedule.json`，用於定義：
@@ -104,7 +123,16 @@
 - 適用情境：需要替換預設邏輯以符合專案場景需求。
 - 重點：Task 不需重寫，通常只替換 Engine 即可。
 
-### 4) 輸入/輸出協議
+### 4) 格式轉換策略（FormatConversionTask 背後的 Engine）
+
+- 可調整點：`FORMAT_STRATEGY_CLASS`
+- 適用情境：規則引擎或下游模組需要特定 schema，例如額外的 `location_id`、
+  `signal_groups`、或場域特定 metadata。
+- 建議方式：以自訂 format engine 繼承或替換預設 `DefaultFormatEngine`，重用既有欄位
+  整理邏輯，並補足場域 metadata。
+- 不建議做法：在 `RuleEngine` 內回頭修補格式，這會讓規則層同時承擔資料整形責任。
+
+### 5) 輸入/輸出協議
 
 - 可調整點：edge events backend、phase publish backend、dispatch engine。
 - 適用情境：對接不同來源（HTTP/MQTT）或不同下游 API 協議。
@@ -115,8 +143,9 @@
 
 1. 需求是「切換時機不對」：先調 `PHASE_ENGINE_CLASS` / `SCHEDULER_ENGINE_CLASS`。  
 2. 需求是「某 phase 應跑另一條流程」：改 `pipeline_schedule.json`。  
-3. 需求是「流程節點行為要改」：替換該節點對應 `*_ENGINE_CLASS`。  
-4. 需求是「外部協議不同」：調整 ingestion/dispatch/publish 對應 engine 或 backend 設定。  
+3. 需求是「規則引擎輸入格式不符合場域需求」：優先替換 `FORMAT_STRATEGY_CLASS`。  
+4. 需求是「流程節點行為要改」：替換該節點對應 `*_ENGINE_CLASS`。  
+5. 需求是「外部協議不同」：調整 ingestion/dispatch/publish 對應 engine 或 backend 設定。  
 
 ## 客製化替換步驟模板
 
@@ -124,6 +153,18 @@
 2. 透過 `.env` 設定對應 `*_ENGINE_CLASS`（或修改 `pipeline_schedule.json`）。  
 3. 啟動服務，確認 log 顯示已載入自訂 class path。  
 4. 觀察節點輸入輸出與下游回應，確認行為符合預期。  
+
+## Event Dispatch 結果語意
+
+事件派送節點的結果可分為三類：
+
+- `dispatched`：事件已成功送至下游通報對象
+- `skipped`：事件依商業規則判定不需送出
+- `failed`：事件應送出但未成功送出，或無法轉換為有效請求
+
+`skipped` 與 `failed` 的區別很重要：
+- `skipped` 代表系統行為符合規則
+- `failed` 代表流程或資料存在缺口，需要追查
 
 ## 驗證清單與回退建議
 
@@ -145,4 +186,6 @@
 - `PIPELINE_SCHEDULE_PATH`：pipeline 排程 JSON 路徑（必填）。  
 - `PHASE_ENGINE_CLASS`：phase engine 類別路徑（可選）。  
 - `SCHEDULER_ENGINE_CLASS`：scheduler engine 類別路徑（可選）。  
-- `RULES_ENGINE_CLASS`、`FORMAT_STRATEGY_CLASS`、`EVENT_DISPATCH_ENGINE_CLASS` 等：節點實作替換入口。  
+- `FORMAT_TASK_ENABLED`：是否啟用格式轉換節點。  
+- `FORMAT_STRATEGY_CLASS`：格式轉換策略類別路徑。  
+- `RULES_ENGINE_CLASS`、`EVENT_DISPATCH_ENGINE_CLASS` 等：節點實作替換入口。  

@@ -13,6 +13,7 @@ from smart_workflow import TaskContext, TaskError
 @dataclass
 class EventDispatchResult:
     dispatched: int = 0
+    skipped: int = 0
     failed: int = 0
     details: Dict[str, Any] | None = None
 
@@ -41,7 +42,7 @@ class DefaultEventDispatchEngine(BaseEventDispatchEngine):
                 event.get("timestamp"),
                 event.get("event_type"),
             )
-        return EventDispatchResult(dispatched=count, failed=0)
+        return EventDispatchResult(dispatched=count, skipped=0, failed=0)
 
 
 def load_event_dispatch_engine(path: str) -> Type[BaseEventDispatchEngine]:

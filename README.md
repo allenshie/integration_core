@@ -22,6 +22,38 @@ uv pip install -e .
 python main.py
 ```
 
+## Core Concepts
+
+`integration_core` 提供的是可重用的流程編排骨架，將資料流拆分為：
+
+1. phase / pipeline 選擇
+2. pipeline 內節點 task 執行
+3. task 背後 engine 的可插拔實作
+
+典型正式流程如下：
+
+`IngestionTask -> MCMOTTask -> FormatConversionTask -> RuleEvaluationTask -> EventDispatchTask`
+
+其中：
+- `IngestionTask`：接收 edge 端推理事件
+- `MCMOTTask`：執行跨相機追蹤與全域物件整理
+- `FormatConversionTask`：將 tracking 結果轉為規則引擎可消費的 `rules_payload`
+- `RuleEvaluationTask`：執行場域規則判定
+- `EventDispatchTask`：將規則事件分流到外部通報對象
+
+## Customization
+
+場域專案通常不直接修改 core task，而是透過設定替換對應 engine：
+
+- `FORMAT_STRATEGY_CLASS`
+- `RULES_ENGINE_CLASS`
+- `EVENT_DISPATCH_ENGINE_CLASS`
+
+若需調整 phase 對應 pipeline，則修改 `PIPELINE_SCHEDULE_PATH` 指向的排程設定。
+
+更多流程與擴充說明請見：
+- `docs/CORE_WORKFLOW.md`
+
 ## 安裝成套件（建議）
 
 若作為子模組或需要在 Docker/K8s 使用，建議安裝成套件（避免手動設定 PYTHONPATH）：
