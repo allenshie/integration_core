@@ -80,8 +80,9 @@ def build_workflow() -> Workflow:
     return workflow
 
 
-def run_daemon(config: AppConfig) -> None:
-    context = build_context(config)
+def run_daemon(config: AppConfig, context: TaskContext | None = None) -> None:
+    if context is None:
+        context = build_context(config)
     init_messaging_client(config, context, LOGGER)
 
     if should_print_config_summary():
@@ -117,10 +118,11 @@ def run_daemon(config: AppConfig) -> None:
         stop_health_server(health_server)
 
 
-def main() -> int:
-    config = load_config()
+def main(config: AppConfig | None = None, context: TaskContext | None = None) -> int:
+    if config is None:
+        config = load_config()
     setup_logging(config.log_level)
-    run_daemon(config)
+    run_daemon(config, context=context)
     return 0
 
 
