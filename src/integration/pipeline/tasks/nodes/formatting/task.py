@@ -1,14 +1,14 @@
 """Normalize MC-MOT output for downstream rules."""
 from __future__ import annotations
 
-from typing import Any, Dict
+from smart_workflow import TaskContext, TaskError, TaskResult
 
-from smart_workflow import BaseTask, TaskContext, TaskError, TaskResult
-
+from integration.pipeline.tasks.base import QuietTaskBase
+from integration.pipeline.tasks.summary import FORMAT_STATS_RESOURCE, store_stage_stats
 from .engine import BaseFormatEngine, DefaultFormatEngine, load_format_engine
 
 
-class FormatConversionTask(BaseTask):
+class FormatConversionTask(QuietTaskBase):
     """Convert MC-MOT result into a shared payload for rule tasks."""
 
     name = "format_conversion"
@@ -26,7 +26,17 @@ class FormatConversionTask(BaseTask):
 
         payload = self._strategy.build_payload(context, events, tracked, global_objects, snapshot)
         context.set_resource("rules_payload", payload)
-        context.logger.info(
+        store_stage_stats(
+            context,
+            FORMAT_STATS_RESOURCE,
+            {
+                "events": len(events),
+                "tracked": len(tracked),
+                "global": len(global_objects),
+                "signal_groups": len((payload.get("overall_metadata") or {}).get("signal_groups") or []),
+            },
+        )
+        context.logger.debug(
             "格式轉換完成：事件 %d、追蹤 %d、全域物件 %d",
             len(events),
             len(tracked),

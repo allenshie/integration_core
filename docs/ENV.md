@@ -1,27 +1,46 @@
 # 環境變數說明
 
-此文件列出可選環境變數與用途。`.env.example` 僅保留核心必填項；
-其餘變數請在需要時加入 `.env`。
+此文件以表格列出環境變數的預設值與用途。`.env.example` 僅保留核心必填項，其餘變數請按需求加入 `.env`。
+
+## 啟動與執行
+
+| 變數 | 預設 | 說明 |
+| --- | --- | --- |
+| `APP_TIMEZONE` | `Asia/Taipei` | 應用時區。 |
+| `LOG_LEVEL` | `INFO` | 日誌等級。 |
+| `CONFIG_SUMMARY` | `0` | 啟動時是否輸出配置摘要。 |
+| `LOOP_INTERVAL_SECONDS` | `5` | 主循環間隔秒數。 |
+| `PIPELINE_SUMMARY_INTERVAL_SECONDS` | `60` | pipeline 摘要輸出間隔秒數。 |
+| `NON_WORKING_IDLE_SECONDS` | `30` | 非工作時段的 idle 秒數。 |
+| `RETRY_BACKOFF_SECONDS` | `10` | 錯誤重試退避時間，單位秒。 |
+| `PIPELINE_SCHEDULE_PATH` | `-` | pipeline schedule 設定檔路徑；通常由主專案 `.env` 或啟動流程注入。 |
+| `CONFIG_ROOT` | `integration root` | 相對路徑解析基準；未設定時回退到 integration root。 |
+| `MONITOR_ENDPOINT` | `-` | Monitoring service endpoint。 |
+| `INTEGRATION_MONITOR_SERVICE_NAME` | `integration-daemon` | 上報 monitoring 時使用的 service 名稱。 |
 
 ## 排程與工作階段
 
-- `PHASE_ENGINE_CLASS`：PhaseEngine 類別路徑（`module:Class`）。用於自訂 phase 切換邏輯。
-- `SCHEDULER_ENGINE_CLASS`：SchedulerEngine 類別路徑（`module:Class`）。用於自訂當前 phase 判斷。
-- `PHASE_STABLE_SECONDS`：整數秒。`DebouncedPhaseEngine` 的穩定時間窗，預設 `180`。
-- `EDGE_EVENT_STALE_SECONDS`：整數秒。超過此秒數未收到新 edge 事件視為 stale，預設 `0`（關閉）。
-- `EDGE_EVENT_STALE_MODE`：`freeze` 或 `unknown`。stale 時行為：保留或切到未知。
-- `EDGE_EVENT_UNKNOWN_PHASE`：字串。stale mode 為 `unknown` 時使用的 phase 名稱。
+| 變數 | 預設 | 說明 |
+| --- | --- | --- |
+| `PHASE_ENGINE_CLASS` | `-` | PhaseEngine 類別路徑（`module:Class`）；未設定時使用 `TimeBasedPhaseEngine`。 |
+| `SCHEDULER_ENGINE_CLASS` | `-` | SchedulerEngine 類別路徑（`module:Class`）；未設定時使用 `SinglePhaseSchedulerEngine`。 |
+| `PHASE_STABLE_SECONDS` | `180` | `DebouncedPhaseEngine` 的穩定時間窗，單位秒。 |
+| `EDGE_EVENT_STALE_SECONDS` | `0` | 超過此秒數未收到新 edge 事件視為 stale；`0` 表示關閉。 |
+| `EDGE_EVENT_STALE_MODE` | `freeze` | stale 時的處理模式：`freeze` 保留穩定 phase，`unknown` 則回傳未知 phase。 |
+| `EDGE_EVENT_UNKNOWN_PHASE` | `unknown` | `EDGE_EVENT_STALE_MODE=unknown` 時使用的 phase 名稱。 |
 
 ## Pipeline 插件
 
-- `INGESTION_ENGINE_CLASS`：Ingestion engine 類別路徑（`module:Class`）。
-- `INGESTION_HANDLER_CLASS`：舊鍵名（相容用途，建議改用 `INGESTION_ENGINE_CLASS`）。
-- `TRACKING_ENGINE_CLASS`：Tracking handler 類別路徑（`module:Class`）。
-- `FORMAT_STRATEGY_CLASS`：Format engine 類別路徑（`module:Class`）。
-- `RULES_ENGINE_CLASS`：Rule engine 類別路徑（`module:Class`）。
-- `EVENT_DISPATCH_ENGINE_CLASS`：事件派送 engine 類別路徑（`module:Class`）。
-- `PHASE_CHANGE_ENGINE_CLASS`：Phase 變更處理 engine 類別路徑（`module:Class`）。
-- `RULES_DETAIL`：字串。規則節點額外描述（僅 log）。
+| 變數 | 預設 | 說明 |
+| --- | --- | --- |
+| `INGESTION_ENGINE_CLASS` | `-` | Ingestion engine 類別路徑（`module:Class`）。 |
+| `INGESTION_HANDLER_CLASS` | `-` | 舊鍵名；相容用途，建議改用 `INGESTION_ENGINE_CLASS`。 |
+| `TRACKING_ENGINE_CLASS` | `-` | Tracking handler 類別路徑（`module:Class`）。 |
+| `FORMAT_STRATEGY_CLASS` | `-` | Format engine 類別路徑（`module:Class`）。 |
+| `RULES_ENGINE_CLASS` | `-` | Rule engine 類別路徑（`module:Class`）。 |
+| `EVENT_DISPATCH_ENGINE_CLASS` | `-` | 事件派送 engine 類別路徑（`module:Class`）。 |
+| `PHASE_CHANGE_ENGINE_CLASS` | `-` | Phase 變更處理 engine 類別路徑（`module:Class`）。 |
+| `RULES_DETAIL` | `-` | 規則節點額外描述，僅用於 log。 |
 
 ## MC-MOT
 
@@ -30,55 +49,66 @@
 
 ## 視覺化（可選）
 
-只有需要輸出全域地圖時才需設定：
+只有需要輸出全域地圖時才需設定下列變數。
 
-- `GLOBAL_MAP_VIS_ENABLED`：`0/1`。
-- `GLOBAL_MAP_VIS_MODE`：`write/show/both`。
-- `GLOBAL_MAP_VIS_OUTPUT`：輸出資料夾路徑。
-- `GLOBAL_MAP_VIS_WINDOW`：視窗名稱。
-- `GLOBAL_MAP_VIS_RADIUS`：整數像素。
-- `GLOBAL_MAP_VIS_LABEL_SCALE`：浮點數。
-- `GLOBAL_MAP_VIS_LABEL_THICKNESS`：整數。
-- `GLOBAL_MAP_VIS_SHOW_ID`：`0/1`。
-- `GLOBAL_MAP_VIS_SHOW_CLASS`：`0/1`。
-- `GLOBAL_MAP_VIS_CAMERAS`：逗號分隔字串，例如 `cam01,cam02`。
-- `GLOBAL_MAP_VIS_SHOW_LEGEND`：`0/1`。
-- `GLOBAL_MAP_VIS_GLOBAL_COLOR`：色碼字串 `#RRGGBB`。
-- `GLOBAL_MAP_VIS_CLASS_COLORS`：`class:#RRGGBB,class2:#RRGGBB`。
-- `GLOBAL_MAP_VIS_GLOBAL_RADIUS_RATIO`：浮點數。
-- `GLOBAL_MAP_VIS_LOCAL_RADIUS_RATIO`：浮點數。
+| 變數 | 預設 | 說明 |
+| --- | --- | --- |
+| `GLOBAL_MAP_VIS_ENABLED` | `0` | 是否啟用全域地圖視覺化。 |
+| `GLOBAL_MAP_VIS_MODE` | `write` | 輸出模式：`write`、`show` 或 `both`。 |
+| `GLOBAL_MAP_VIS_OUTPUT` | `output/global_map` | 輸出資料夾路徑。 |
+| `GLOBAL_MAP_VIS_WINDOW` | `global-map` | 視窗名稱。 |
+| `GLOBAL_MAP_VIS_RADIUS` | `6` | 標記半徑，單位像素。 |
+| `GLOBAL_MAP_VIS_LABEL_SCALE` | `0.5` | 標籤字型縮放。 |
+| `GLOBAL_MAP_VIS_LABEL_THICKNESS` | `1` | 標籤粗細。 |
+| `GLOBAL_MAP_VIS_SHOW_ID` | `1` | 是否顯示 global id。 |
+| `GLOBAL_MAP_VIS_SHOW_CLASS` | `0` | 是否顯示 class 名稱。 |
+| `GLOBAL_MAP_VIS_CAMERAS` | `-` | 逗號分隔的 camera id 清單，例如 `cam01,cam02`。 |
+| `GLOBAL_MAP_VIS_SHOW_LEGEND` | `1` | 是否顯示圖例。 |
+| `GLOBAL_MAP_VIS_GLOBAL_COLOR` | `-` | 全域物件色碼，格式 `#RRGGBB`。 |
+| `GLOBAL_MAP_VIS_CLASS_COLORS` | `-` | 類別色碼對應，格式 `class:#RRGGBB,class2:#RRGGBB`。 |
+| `GLOBAL_MAP_VIS_GLOBAL_RADIUS_RATIO` | `0.008` | 全域物件半徑比例。 |
+| `GLOBAL_MAP_VIS_LOCAL_RADIUS_RATIO` | `0.004` | 區域物件半徑比例。 |
 
 ## 通訊用途參數
 
-- `EDGE_EVENT_BACKEND`：`http` 或 `mqtt`。預設 `http`。
-- `EDGE_EVENTS_TOPIC`：edge 事件通道名稱。預設 `edge/events`。
-- `PHASE_PUBLISH_BACKEND`：`mqtt/http`。phase 廣播協議；未設定時預設跟隨 `EDGE_EVENT_BACKEND`。
-- `PHASE_TOPIC`：phase 廣播通道名稱。預設 `integration/phase`。
-- `EDGE_EVENT_MAX_AGE`：整數秒。超過此秒數的事件會被丟棄。
+| 變數 | 預設 | 說明 |
+| --- | --- | --- |
+| `EDGE_EVENT_BACKEND` | `http` | edge 事件接收協議：`http` 或 `mqtt`。 |
+| `EDGE_EVENT_HOST` | `0.0.0.0` | edge event HTTP server host。 |
+| `EDGE_EVENT_PORT` | `9000` | edge event HTTP server port。 |
+| `EDGE_EVENTS_TOPIC` | `edge/events` | edge 事件通道名稱。 |
+| `EDGE_EVENT_MAX_AGE` | `5` | 超過此秒數的 edge 事件會被丟棄。 |
+| `PHASE_BROADCAST_ENABLED` | `1` | 是否啟用 phase 廣播；關閉後仍會計算 phase 與執行 pipeline，但不會送出 phase 訊息。 |
+| `PHASE_PUBLISH_BACKEND` | 跟隨 `EDGE_EVENT_BACKEND` | phase 廣播協議：`mqtt` 或 `http`；未設定時會沿用 `EDGE_EVENT_BACKEND`。 |
+| `PHASE_TOPIC` | `integration/phase` | phase 廣播通道名稱。 |
+| `PHASE_HEARTBEAT_SECONDS` | `600` | phase 心跳重送間隔，單位秒。 |
 
 ## MQTT 協議參數
 
-- `MQTT_ENABLED`：`0/1`。是否啟用 MQTT 能力。
-- `MQTT_HOST`：字串。MQTT broker host，預設 `localhost`。
-- `MQTT_PORT`：整數。MQTT broker port，預設 `1883`。
-- `MQTT_QOS`：整數（0/1/2）。建議 `1`。
-- `MQTT_RETAIN`：`0/1`。是否保留最後狀態，建議 `1`。
-- `PHASE_HEARTBEAT_SECONDS`：整數秒。狀態心跳重送間隔主鍵，預設 `600`。
-- `MQTT_CLIENT_ID`：字串。MQTT client id（可選）。
-- `MQTT_AUTH_ENABLED`：`0/1`。是否啟用 MQTT 帳密驗證（預設 `0`）。
-- `MQTT_USERNAME`：字串。MQTT 使用者名稱（`MQTT_AUTH_ENABLED=1` 時必填）。
-- `MQTT_PASSWORD`：字串。MQTT 密碼（建議透過 Secret 或 env 注入）。
+| 變數 | 預設 | 說明 |
+| --- | --- | --- |
+| `MQTT_ENABLED` | `0` | 是否啟用 MQTT 能力。 |
+| `MQTT_HOST` | `localhost` | MQTT broker host。 |
+| `MQTT_PORT` | `1883` | MQTT broker port。 |
+| `MQTT_QOS` | `1` | MQTT QoS 層級。 |
+| `MQTT_RETAIN` | `1` | 是否保留最後狀態。 |
+| `MQTT_CLIENT_ID` | `-` | MQTT client id，可選。 |
+| `MQTT_AUTH_ENABLED` | `0` | 是否啟用 MQTT 帳密驗證。 |
+| `MQTT_USERNAME` | `-` | MQTT 使用者名稱；`MQTT_AUTH_ENABLED=1` 時必填。 |
+| `MQTT_PASSWORD` | `-` | MQTT 密碼；建議透過 Secret 或 env 注入。 |
 
 ## HTTP 協議參數
 
-- `PHASE_HTTP_BASE_URL`：HTTP base URL（例如 `http://localhost:9001`）。
-- `PHASE_HTTP_TIMEOUT_SECONDS`：HTTP timeout 秒數，預設 `5`。
+| 變數 | 預設 | 說明 |
+| --- | --- | --- |
+| `PHASE_HTTP_BASE_URL` | `-` | HTTP base URL，例如 `http://localhost:9001`。 |
+| `PHASE_HTTP_TIMEOUT_SECONDS` | `5` | HTTP timeout 秒數。 |
 
 ## 協議設定範例
 
 ### phase 發佈（MQTT）
 
-```
+```bash
 MQTT_ENABLED=1
 MQTT_HOST=localhost
 MQTT_PORT=1883
@@ -94,7 +124,7 @@ PHASE_PUBLISH_BACKEND=mqtt
 
 ### edge events 接收（HTTP / MQTT）
 
-```
+```bash
 # HTTP 模式
 EDGE_EVENT_BACKEND=http
 EDGE_EVENT_HOST=0.0.0.0
@@ -114,38 +144,48 @@ PHASE_PUBLISH_BACKEND=mqtt
 PHASE_TOPIC=integration/phase
 ```
 
-預設建議：
-- `EDGE_EVENT_BACKEND` 與 `PHASE_PUBLISH_BACKEND` 使用相同協議，維持 edge 與 integration core 的通訊一致性。
-- 只有在特殊整合需求下才分離兩者協議。
-- integration core 會根據用途參數與協議參數組裝對應的 messaging 設定。
-- 若需新增協議，請參考 `smart_messaging_core` 的協議文件與 route 設計。
+## 協議設定建議
+
+| 項目 | 建議 | 說明 |
+| --- | --- | --- |
+| Edge / phase 協議 | 同步 | `EDGE_EVENT_BACKEND` 與 `PHASE_PUBLISH_BACKEND` 最好使用相同協議，維持 edge 與 integration core 的通訊一致性。 |
+| 協議分離 | 例外處理 | 只有在特殊整合需求下才分離兩者協議。 |
+| 設定組裝 | 自動 | integration core 會根據用途參數與協議參數組裝對應的 messaging 設定。 |
+| 新增協議 | 參考文件 | 若需新增協議，請參考 `smart_messaging_core` 的協議文件與 route 設計。 |
 
 ## 執行節奏
 
-- `LOOP_INTERVAL_SECONDS`：整數秒。主循環間隔。
-- `RETRY_BACKOFF_SECONDS`：整數秒。錯誤重試退避時間。
-- `CONFIG_SUMMARY`：`0/1`。啟動時輸出配置摘要（engine/pipeline 設定）。
-- `PIPELINE_SCHEDULE_PATH`：pipeline schedule 設定檔路徑。格式與範例請見 `docs/CORE_WORKFLOW.md`。
-- `CONFIG_ROOT`：相對路徑解析基準（建議設為主專案根目錄）；未設定時回退到 integration root。
+| 變數 | 預設 | 說明 |
+| --- | --- | --- |
+| `LOOP_INTERVAL_SECONDS` | `5` | 主循環間隔秒數。 |
+| `RETRY_BACKOFF_SECONDS` | `10` | 錯誤重試退避時間，單位秒。 |
+| `CONFIG_SUMMARY` | `0` | 啟動時是否輸出配置摘要（engine / pipeline / phase broadcast）。 |
 
 ## 健康檢查（K8s Probe）
 
-- `INTEGRATION_HEALTH_SERVER_ENABLED`：`0/1`。是否啟用健康檢查 HTTP server（預設 `0`）。
-- `INTEGRATION_HEALTH_SERVER_HOST`：健康檢查服務 host（預設 `0.0.0.0`）。
-- `INTEGRATION_HEALTH_SERVER_PORT`：健康檢查服務 port（預設 `8081`）。
-- `INTEGRATION_HEALTH_LIVENESS_TIMEOUT_SECONDS`：`/healthz` loop 心跳逾時秒數（預設 `30`）。
-- `INTEGRATION_HEALTH_READINESS_TIMEOUT_SECONDS`：`/readyz` 最近進度逾時秒數（預設 `30`）。
-- `INTEGRATION_HEALTH_STARTUP_GRACE_SECONDS`：startup 完成後首次 loop/progress 寬限秒數（預設 `10`）。
+| 變數 | 預設 | 說明 |
+| --- | --- | --- |
+| `INTEGRATION_HEALTH_SERVER_ENABLED` | `0` | 是否啟用健康檢查 HTTP server。 |
+| `INTEGRATION_HEALTH_SERVER_HOST` | `0.0.0.0` | 健康檢查服務 host。 |
+| `INTEGRATION_HEALTH_SERVER_PORT` | `8081` | 健康檢查服務 port。 |
+| `INTEGRATION_HEALTH_LIVENESS_TIMEOUT_SECONDS` | `30` | `/healthz` loop 心跳逾時秒數。 |
+| `INTEGRATION_HEALTH_READINESS_TIMEOUT_SECONDS` | `30` | `/readyz` 最近進度逾時秒數。 |
+| `INTEGRATION_HEALTH_STARTUP_GRACE_SECONDS` | `10` | startup 完成後首次 loop / progress 寬限秒數。 |
 
 啟用後提供：
-- `GET /startupz`
-- `GET /healthz`
-- `GET /readyz`
+
+| Endpoint |
+| --- |
+| `GET /startupz` |
+| `GET /healthz` |
+| `GET /readyz` |
 
 ## Iron Gate Scheduler（專案插件）
 
-僅在使用 `IronGateSchedulerEngine` 時需要：
+僅在使用 `IronGateSchedulerEngine` 時需要。
 
-- `EDGE_GATE_CLASS`：字串。鐵門類別名稱，預設 `iron_gate`。
-- `EDGE_WORKING_PHASE`：字串。對應開門時的 phase 名稱，預設 `working`。
-- `EDGE_NON_WORKING_PHASE`：字串。對應關門時的 phase 名稱，預設 `non_working`。
+| 變數 | 預設 | 說明 |
+| --- | --- | --- |
+| `EDGE_GATE_CLASS` | `iron_gate` | 鐵門類別名稱。 |
+| `EDGE_WORKING_PHASE` | `working` | 對應開門時的 phase 名稱。 |
+| `EDGE_NON_WORKING_PHASE` | `non_working` | 對應關門時的 phase 名稱。 |

@@ -1,14 +1,16 @@
 """MC-MOT integration stage."""
 from __future__ import annotations
 
-from smart_workflow import BaseTask, TaskContext, TaskResult, TaskError
+from smart_workflow import TaskContext, TaskResult, TaskError
 
 from integration.mcmot.visualization.map_overlay import GlobalMapRenderer, OverlayResult
+from integration.pipeline.tasks.base import QuietTaskBase
+from integration.pipeline.tasks.summary import MC_MOT_STATS_RESOURCE, store_stage_stats
 from integration.pipeline.tasks.nodes.tracking.engine import MCMOTEngine
-from .handler import BaseTrackingHandler, DefaultTrackingHandler, TrackingResult, load_tracking_handler
+from .handler import BaseTrackingHandler, DefaultTrackingHandler, load_tracking_handler
 
 
-class MCMOTTask(BaseTask):
+class MCMOTTask(QuietTaskBase):
     name = "mc_mot"
 
     def __init__(self, context: TaskContext | None = None) -> None:
@@ -21,7 +23,16 @@ class MCMOTTask(BaseTask):
             self._handler = self._init_handler(context)
         events = context.get_resource("edge_events") or []
         if not context.config.mcmot_enabled:
-            context.logger.info("MC-MOT 已停用，略過 %d 筆事件", len(events))
+            store_stage_stats(
+                context,
+                MC_MOT_STATS_RESOURCE,
+                {
+                    "events": len(events),
+                    "tracked": 0,
+                    "global": 0,
+                },
+            )
+            context.logger.debug("MC-MOT 已停用，略過 %d 筆事件", len(events))
             context.set_resource("mc_mot_tracked", [])
             context.set_resource("mc_mot_global_objects", [])
             return TaskResult(status="mc_mot_skipped")
@@ -29,10 +40,19 @@ class MCMOTTask(BaseTask):
         result = self._handler.process(context, events)
         context.set_resource("mc_mot_tracked", result.tracked_objects)
         context.set_resource("mc_mot_global_objects", result.global_objects)
+        store_stage_stats(
+            context,
+            MC_MOT_STATS_RESOURCE,
+            {
+                "events": result.processed_events,
+                "tracked": len(result.tracked_objects),
+                "global": len(result.global_objects),
+            },
+        )
 
         self._maybe_render_global_map(context, result.global_objects, result.tracked_objects)
 
-        context.logger.info(
+        context.logger.debug(
             "MC-MOT 處理 %d 筆事件，產生 %d 筆追蹤結果，維護 %d 筆全域物件",
             result.processed_events,
             len(result.tracked_objects),

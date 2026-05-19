@@ -14,9 +14,13 @@ def log_config_summary(config, context, logger) -> None:
     scheduler_engine_name = scheduler_engine.__class__.__name__ if scheduler_engine else "unknown"
     phase_engine_path = getattr(getattr(config, "phase_task", None), "engine_class", None)
     phase_engine_name = phase_engine_path or "TimeBasedPhaseEngine"
+    phase_broadcast_enabled = getattr(getattr(config, "phase_messaging", None), "enabled", True)
+    pipeline_summary_interval_seconds = getattr(config, "pipeline_summary_interval_seconds", 60.0)
     logger.info(
-        "config summary:\n- scheduler_engine: %s\n- phase_engine: %s\n- pipeline_schedule: %s",
+        "config summary:\n- scheduler_engine: %s\n- phase_engine: %s\n- phase_broadcast_enabled: %s\n- pipeline_summary_interval_seconds: %s\n- pipeline_schedule: %s",
         scheduler_engine_name,
         phase_engine_name,
+        phase_broadcast_enabled,
+        pipeline_summary_interval_seconds,
         config.pipeline_schedule_path,
     )

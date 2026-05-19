@@ -3,12 +3,14 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-from smart_workflow import BaseTask, TaskContext, TaskResult, TaskError
+from smart_workflow import TaskContext, TaskResult, TaskError
 
+from integration.pipeline.tasks.base import QuietTaskBase
+from integration.pipeline.tasks.summary import RULE_STATS_RESOURCE, store_stage_stats
 from .engine import BaseRuleEngine, DefaultRuleEngine, RuleEngineResult, load_rule_engine
 
 
-class RuleEvaluationTask(BaseTask):
+class RuleEvaluationTask(QuietTaskBase):
     name = "rule_evaluation"
 
     def __init__(self, context: TaskContext | None = None) -> None:
@@ -26,8 +28,16 @@ class RuleEvaluationTask(BaseTask):
         engine_result = self._engine.process(context, payload)
         self._apply_context_updates(context, engine_result)
         self._apply_rule_events(context, engine_result)
+        warning_events = context.get_resource("rule_events") or []
+        store_stage_stats(
+            context,
+            RULE_STATS_RESOURCE,
+            {
+                "warnings": len(warning_events),
+            },
+        )
         total = summary.get("total", 0)
-        context.logger.info(
+        context.logger.debug(
             "完成節點：違規/作業規則判定%s，全域物件總數 %s",
             detail_suffix,
             total,

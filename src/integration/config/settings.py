@@ -207,6 +207,7 @@ class EdgeEventMessagingConfig:
 
 @dataclass
 class PhaseMessagingConfig:
+    enabled: bool = _env_bool("PHASE_BROADCAST_ENABLED", True)
     backend: str = _phase_publish_backend()
     channel: str = _phase_topic()
     heartbeat_seconds: int = int(os.getenv("PHASE_HEARTBEAT_SECONDS", "600"))
@@ -265,6 +266,7 @@ class AppConfig:
     )
     timezone: timezone = timezone.utc
     loop_interval_seconds: float = float(os.getenv("LOOP_INTERVAL_SECONDS", "5"))
+    pipeline_summary_interval_seconds: float = float(os.getenv("PIPELINE_SUMMARY_INTERVAL_SECONDS", "60"))
     non_working_idle_seconds: float = float(os.getenv("NON_WORKING_IDLE_SECONDS", "30"))
     retry_backoff_seconds: float = float(os.getenv("RETRY_BACKOFF_SECONDS", "10"))
     edge_event_host: str = os.getenv("EDGE_EVENT_HOST", "0.0.0.0")

@@ -1,6 +1,7 @@
 """Phase controller task switching working/non-working pipelines."""
 from __future__ import annotations
 
+import logging
 import time
 
 from integration.pipeline.control.phase_engine import BasePhaseEngine, TimeBasedPhaseEngine, load_phase_engine
@@ -22,6 +23,21 @@ class PhaseTask(BaseTask):
         self._last_phase: str | None = None
         self._last_publish_time: float = 0.0
         self._last_run_time_by_phase: dict[str, float] = {}
+
+    def execute(self, context: TaskContext) -> TaskResult:
+        """Run the phase controller without the default task-start INFO log."""
+        try:
+            result = self.run(context)
+        except TaskError as exc:
+            context.report_failure(self.name, detail=str(exc))
+            raise
+        except Exception as exc:  # noqa: BLE001
+            context.report_failure(self.name, detail=str(exc))
+            raise
+
+        result = result or TaskResult()
+        context.report_success(self.name)
+        return result
 
     def run(self, context: TaskContext) -> TaskResult:
         state = self._load_state(context)
@@ -48,6 +64,7 @@ class PhaseTask(BaseTask):
         # 3) 回報 heartbeat、必要時推播 phase 變更
         context.monitor.heartbeat(phase=phase.name)
         publish_cfg = getattr(context.config, "phase_messaging", None)
+        broadcast_enabled = getattr(publish_cfg, "enabled", True) if publish_cfg else True
         publish_backend = (getattr(publish_cfg, "backend", None) or "mqtt").strip().lower()
         heartbeat_seconds = getattr(publish_cfg, "heartbeat_seconds", 0) if publish_cfg else 0
         changed, heartbeat_due = self._phase_change_flags(
@@ -56,11 +73,14 @@ class PhaseTask(BaseTask):
             last_phase,
             last_publish_time,
         )
-        context.logger.info(
-            "phase task: phase=%s changed=%s heartbeat_due=%s",
+        log_level = logging.INFO if changed or heartbeat_due else logging.DEBUG
+        context.logger.log(
+            log_level,
+            "phase task: phase=%s changed=%s heartbeat_due=%s broadcast_enabled=%s",
             phase.name,
             changed,
             heartbeat_due,
+            broadcast_enabled,
         )
         self._maybe_notify_phase_change(context, phase.name, changed, last_phase)
         self._maybe_publish_phase(
@@ -68,9 +88,11 @@ class PhaseTask(BaseTask):
             phase.name,
             changed,
             heartbeat_due,
+            broadcast_enabled,
             publish_backend,
             state,
         )
+        state["last_phase"] = phase.name
 
         try:
             # 4) 根據 phase 的 interval_seconds 進行節流判斷
@@ -163,13 +185,18 @@ class PhaseTask(BaseTask):
         phase_name: str,
         changed: bool,
         heartbeat_due: bool,
+        broadcast_enabled: bool,
         publish_backend: str,
         state: dict[str, object],
     ) -> None:
-        now = time.time()
+        if not broadcast_enabled:
+            return
+
         if not changed and not heartbeat_due:
             return
 
+        now = time.time()
+        state["last_publish_time"] = now
         messaging = context.get_resource("messaging_client")
         if messaging is None:
             context.logger.warning("phase publish skipped: messaging_client not ready")
@@ -184,10 +211,7 @@ class PhaseTask(BaseTask):
             context.logger.warning("phase publish skipped (backend=%s): %s", publish_backend, exc)
             return
 
-        if published:
-            state["last_phase"] = phase_name
-            state["last_publish_time"] = now
-        else:
+        if not published:
             context.logger.warning("phase publish failed: backend=%s phase=%s", publish_backend, phase_name)
 
     def _load_state(self, context: TaskContext) -> dict[str, object]:

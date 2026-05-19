@@ -3,17 +3,18 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
-from smart_workflow import BaseTask, TaskContext, TaskResult, TaskError
+from smart_workflow import TaskContext, TaskResult, TaskError
 
+from integration.pipeline.tasks.base import QuietTaskBase
+from integration.pipeline.tasks.summary import EVENT_DISPATCH_STATS_RESOURCE, store_stage_stats
 from .engine import (
     BaseEventDispatchEngine,
     DefaultEventDispatchEngine,
-    EventDispatchResult,
     load_event_dispatch_engine,
 )
 
 
-class EventDispatchTask(BaseTask):
+class EventDispatchTask(QuietTaskBase):
     name = "event_dispatch"
 
     def __init__(self, context: TaskContext | None = None) -> None:
@@ -34,6 +35,15 @@ class EventDispatchTask(BaseTask):
                     raise TaskError(f"event missing field: {key}")
 
         result = self._engine.dispatch(events, context)
+        store_stage_stats(
+            context,
+            EVENT_DISPATCH_STATS_RESOURCE,
+            {
+                "dispatched": result.dispatched,
+                "skipped": result.skipped,
+                "failed": result.failed,
+            },
+        )
         payload = {
             "dispatched": result.dispatched,
             "skipped": result.skipped,

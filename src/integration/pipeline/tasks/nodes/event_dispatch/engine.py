@@ -35,7 +35,7 @@ class DefaultEventDispatchEngine(BaseEventDispatchEngine):
     def dispatch(self, events: List[Dict[str, Any]], context: TaskContext) -> EventDispatchResult:
         count = len(events)
         for event in events:
-            context.logger.info(
+            context.logger.debug(
                 "event dispatch: id=%s name=%s timestamp=%s event_type=%s",
                 event.get("id"),
                 event.get("name"),

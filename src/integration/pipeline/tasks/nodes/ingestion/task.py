@@ -1,12 +1,15 @@
 """Ingestion stage task."""
 from __future__ import annotations
 
-from smart_workflow import BaseTask, TaskContext, TaskResult, TaskError
+from smart_workflow import TaskContext, TaskResult, TaskError
 
-from .engine import BaseIngestionEngine, DefaultIngestionEngine, IngestionResult, load_ingestion_engine
+from integration.pipeline.tasks.base import QuietTaskBase
+from integration.pipeline.tasks.summary import INGESTION_STATS_RESOURCE, store_stage_stats
+
+from .engine import BaseIngestionEngine, DefaultIngestionEngine, load_ingestion_engine
 
 
-class IngestionTask(BaseTask):
+class IngestionTask(QuietTaskBase):
     name = "ingestion"
 
     def __init__(self, context: TaskContext | None = None) -> None:
@@ -20,7 +23,16 @@ class IngestionTask(BaseTask):
         result = self._engine.process(context, raw_events)
         context.set_resource("edge_events", result.events)
         context.set_resource("edge_events_latest", result.events)
-        context.logger.info(
+        store_stage_stats(
+            context,
+            INGESTION_STATS_RESOURCE,
+            {
+                "raw": result.raw_count,
+                "events": len(result.events),
+                "dropped": result.dropped,
+            },
+        )
+        context.logger.debug(
             "匯入 %d 台相機的最新事件（原始 %d 筆，丟棄 %d 筆）",
             len(result.events),
             result.raw_count,

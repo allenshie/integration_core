@@ -1,8 +1,7 @@
-"""Pipeline control layer (scheduler + phase engines)."""
+"""Pipeline control layer (scheduler, phase engines, and phase change hooks)."""
 from .phase_task import PhaseTask
 from .phase_engine import BasePhaseEngine, TimeBasedPhaseEngine, DebouncedPhaseEngine, load_phase_engine
 from .phase_change import BasePhaseChangeEngine, DefaultPhaseChangeEngine, load_phase_change_engine
-from .phase_publishers import BasePhasePublisher, PhasePublisherRegistry
 from .scheduler import BaseSchedulerEngine, SinglePhaseSchedulerEngine, TimeWindowSchedulerEngine, PipelineScheduler
 
 __all__ = [
@@ -18,6 +17,4 @@ __all__ = [
     "BasePhaseChangeEngine",
     "DefaultPhaseChangeEngine",
     "load_phase_change_engine",
-    "BasePhasePublisher",
-    "PhasePublisherRegistry",
 ]
