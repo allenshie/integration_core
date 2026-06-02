@@ -1,22 +1,7 @@
 from __future__ import annotations
 
 import logging
-import sys
-from pathlib import Path
 from types import SimpleNamespace
-
-
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-SRC_ROOT = PROJECT_ROOT / "src"
-SMART_WORKFLOW_ROOT = Path(__file__).resolve().parents[3] / "test_space" / "smart-workflow"
-if str(SRC_ROOT) not in sys.path:
-    sys.path.insert(0, str(SRC_ROOT))
-if str(SMART_WORKFLOW_ROOT) not in sys.path:
-    sys.path.insert(0, str(SMART_WORKFLOW_ROOT))
-
-for module_name in list(sys.modules):
-    if module_name == "integration" or module_name.startswith("integration."):
-        sys.modules.pop(module_name)
 
 from integration.pipeline.control.phase_task import PhaseTask
 from integration.pipeline.control.scheduler import Phase
@@ -70,6 +55,8 @@ class DummyContext:
         self._resources = dict(resources or {})
         self.logger = logging.getLogger("phase-broadcast-test")
         self.monitor = DummyMonitor()
+        self.reported_success: list[str] = []
+        self.reported_failure: list[tuple[str, str | None]] = []
 
     def get_resource(self, key: str):
         return self._resources.get(key)
@@ -82,6 +69,12 @@ class DummyContext:
         if value is None:
             raise KeyError(key)
         return value
+
+    def report_success(self, name: str) -> None:
+        self.reported_success.append(name)
+
+    def report_failure(self, name: str, detail: str | None = None) -> None:
+        self.reported_failure.append((name, detail))
 
 
 def build_config(broadcast_enabled: bool):

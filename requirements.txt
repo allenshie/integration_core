@@ -1,14 +1,9 @@
 opencv-python-headless>=4.10
 numpy==1.26
-shapely>=2.0
-fastdtw>=0.3.4
-pykalman>=0.9.5
-loguru>=0.7
-scipy>=1.11
 pydantic>=2.0
 PyYAML>=6.0
-torch>=2.3
 python-dotenv>=0.21.0
 paho-mqtt>=1.6.1
-git+https://github.com/allenshie/smart-workflow.git@346a65f87394d0fe39b8761734447940b901ab62
+git+https://github.com/allenshie/smart-workflow.git@b5ef4c4dbab3525a5dc1c5f1c7eb689da5baf6ee
+MCMOT @ git+ssh://git@github.com/ChenPingChen/MCMOT.git@793a087a17f6981aa8f7dbf14e38693e2ae7071e
 smart-messaging-core==0.1.1

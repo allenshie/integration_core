@@ -47,20 +47,13 @@ class RuleEvaluationTask(QuietTaskBase):
 
     def _init_engine(self, cfg, context: TaskContext | None) -> BaseRuleEngine:
         engine_path = getattr(cfg, "engine_class", None) if cfg else None
-        if not engine_path:
-            return DefaultRuleEngine(context=context)
-        try:
-            engine_cls = load_rule_engine(engine_path)
-        except Exception as exc:  # pylint: disable=broad-except
-            raise TaskError(f"無法載入規則 Engine：{engine_path}") from exc
-
-        try:
-            return engine_cls(context=context)
-        except TypeError:
-            try:
-                return engine_cls()
-            except TypeError as exc:  # pragma: no cover
-                raise TaskError(f"規則 Engine {engine_path} 無法初始化") from exc
+        return self._init_plugin(
+            plugin_name="規則 Engine",
+            loader=load_rule_engine,
+            plugin_path=engine_path,
+            default_factory=lambda: DefaultRuleEngine(context=context),
+            init_kwargs={"context": context},
+        )
 
     def _apply_context_updates(self, context: TaskContext, result: RuleEngineResult | None) -> None:
         if not result or not result.context_updates:

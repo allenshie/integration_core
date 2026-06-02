@@ -1,0 +1,305 @@
+from __future__ import annotations
+
+import logging
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+from types import ModuleType, SimpleNamespace
+
+from integration.pipeline.tasks.nodes.tracking.engine import MCMOTEngine
+from integration.pipeline.tasks.nodes.tracking.task import MCMOTTask
+from integration.config.visualization import GlobalMapVisualizationConfig
+
+
+class DummyContext:
+    def __init__(self, config, resources: dict[str, object] | None = None) -> None:
+        self.config = config
+        self._resources = dict(resources or {})
+        self.logger = logging.getLogger("mcmot-adapter-test")
+        self.reported_success: list[str] = []
+        self.reported_failure: list[tuple[str, str | None]] = []
+
+    def get_resource(self, key: str):
+        return self._resources.get(key)
+
+    def set_resource(self, key: str, value) -> None:  # noqa: ANN001
+        self._resources[key] = value
+
+    def require_resource(self, key: str):
+        if key not in self._resources:
+            raise KeyError(key)
+        return self._resources[key]
+
+    def report_success(self, name: str) -> None:
+        self.reported_success.append(name)
+
+    def report_failure(self, name: str, detail: str | None = None) -> None:
+        self.reported_failure.append((name, detail))
+
+
+def _build_fake_mcmot_module(state: dict[str, object]) -> ModuleType:
+    module = ModuleType("mcmot")
+
+    class FakeMCMOT:
+        def __init__(self, config=None):  # noqa: ANN001
+            state["config_path"] = config
+            self.config = SimpleNamespace(
+                map=SimpleNamespace(
+                    image_path="/tmp/global-map.png",
+                    pixel_width=100,
+                    pixel_height=50,
+                    width_meters=10.0,
+                    height_meters=5.0,
+                ),
+                cameras=[
+                    SimpleNamespace(
+                        camera_id="camera_1",
+                        edge_id="cam01",
+                        source_id="cam01",
+                        name="Camera 1",
+                        enabled=True,
+                        color_hex="#228B22",
+                    ),
+                ],
+            )
+            self._last_timestamp = None
+
+        def process_detected_objects(self, camera_id, timestamp, detected_objects):  # noqa: ANN001
+            state["process_call"] = {
+                "camera_id": camera_id,
+                "timestamp": timestamp,
+                "detected_objects": list(detected_objects),
+            }
+            return [
+                {
+                    "camera_id": camera_id,
+                    "class_name": detected_objects[0]["class_name"],
+                    "local_id": detected_objects[0]["local_id"],
+                    "global_id": "g-1",
+                    "bbox": detected_objects[0]["bbox"],
+                    "score": detected_objects[0]["score"],
+                    "timestamp": timestamp,
+                    "global_trajectory": [(timestamp, 12.0, 34.0)],
+                }
+            ]
+
+        def finalize_global_updates(self, timestamp):  # noqa: ANN001
+            self._last_timestamp = timestamp
+            state["finalize_timestamp"] = timestamp
+
+        def get_all_global_objects(self):
+            timestamp = self._last_timestamp
+            if timestamp is None:
+                return []
+            return [
+                SimpleNamespace(
+                    global_id="g-1",
+                    class_name="person",
+                    camera_id="camera_1",
+                    trajectory=[(timestamp, 12.0, 34.0)],
+                    update_time=timestamp,
+                )
+            ]
+
+    module.MCMOT = FakeMCMOT
+    return module
+
+
+def test_mcmot_task_skips_without_external_package_when_disabled() -> None:
+    context = DummyContext(
+        config=SimpleNamespace(
+            mcmot_enabled=False,
+            mcmot_config_path="data/config/mcmot.config.yaml",
+            global_map_visualization_enabled=False,
+        ),
+        resources={
+            "edge_events": [
+                {
+                    "camera_id": "cam01",
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "detections": [],
+                },
+            ]
+        },
+    )
+
+    task = MCMOTTask()
+    result = task.execute(context)
+
+    assert result.status == "mc_mot_skipped"
+    assert context.get_resource("mc_mot_tracked") == []
+    assert context.get_resource("mc_mot_global_objects") == []
+    assert context.reported_success == ["mc_mot"]
+
+
+def test_mcmot_engine_uses_external_mcmot_module(monkeypatch) -> None:
+    fake_state: dict[str, object] = {}
+    monkeypatch.setitem(sys.modules, "mcmot", _build_fake_mcmot_module(fake_state))
+
+    config_path = Path("/tmp/mcmot-config.yaml")
+    engine = MCMOTEngine(config=str(config_path))
+
+    timestamp = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
+    result = engine.process_events(
+        [
+            {
+                "camera_id": "cam01",
+                "timestamp": timestamp.isoformat(),
+                "detections": [
+                    {
+                        "local_id": 7,
+                        "class_name": "person",
+                        "score": 0.95,
+                        "bbox": [10, 20, 30, 40],
+                    }
+                ],
+            }
+        ]
+    )
+
+    assert fake_state["config_path"] == str(config_path)
+    assert fake_state["process_call"]["camera_id"] == "cam01"
+    assert fake_state["finalize_timestamp"] == timestamp
+    assert engine.config.map.pixel_width == 100
+    assert result.tracked_objects == [
+        {
+            "camera_id": "cam01",
+            "class_name": "person",
+            "local_id": 7,
+            "global_id": "g-1",
+            "bbox": [10, 20, 30, 40],
+            "score": 0.95,
+            "timestamp": timestamp.isoformat(),
+            "global_position": {"x": 12.0, "y": 34.0},
+        }
+    ]
+    assert result.global_objects == [
+        {
+            "global_id": "g-1",
+            "class_name": "person",
+            "camera_id": "camera_1",
+            "trajectory": [
+                {
+                    "timestamp": timestamp.isoformat(),
+                    "x": 12.0,
+                    "y": 34.0,
+                }
+            ],
+            "updated_at": timestamp.isoformat(),
+        }
+    ]
+
+
+def test_mcmot_task_initializes_engine_from_external_module(monkeypatch) -> None:
+    fake_state: dict[str, object] = {}
+    monkeypatch.setitem(sys.modules, "mcmot", _build_fake_mcmot_module(fake_state))
+
+    context = DummyContext(
+        config=SimpleNamespace(
+            mcmot_enabled=True,
+            mcmot_config_path="/tmp/mcmot-config.yaml",
+            global_map_visualization_enabled=False,
+        ),
+        resources={
+            "edge_events": [
+                {
+                    "camera_id": "cam01",
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "detections": [
+                        {
+                            "local_id": 7,
+                            "class_name": "person",
+                            "score": 0.95,
+                            "bbox": [10, 20, 30, 40],
+                        }
+                    ],
+                }
+            ]
+        },
+    )
+
+    task = MCMOTTask()
+    result = task.execute(context)
+
+    assert result.status == "mc_mot_done"
+    assert result.payload == {"events": 1, "tracked": 1, "global_objects": 1}
+    assert context.get_resource("mcmot_engine") is not None
+    assert context.get_resource("global_map_renderer") is None
+    assert len(context.get_resource("mc_mot_tracked")) == 1
+    assert len(context.get_resource("mc_mot_global_objects")) == 1
+    assert fake_state["config_path"] == "/tmp/mcmot-config.yaml"
+
+
+def test_mcmot_task_init_engine_uses_default_engine_class(monkeypatch) -> None:
+    fake_state: dict[str, object] = {}
+    monkeypatch.setitem(sys.modules, "mcmot", _build_fake_mcmot_module(fake_state))
+
+    context = DummyContext(
+        config=SimpleNamespace(
+            mcmot_enabled=True,
+            mcmot_config_path="/tmp/mcmot-config.yaml",
+            global_map_visualization_enabled=False,
+        ),
+        resources={},
+    )
+
+    task = MCMOTTask()
+    engine = task._init_engine(context)
+
+    assert isinstance(engine, MCMOTEngine)
+    assert fake_state["config_path"] == "/tmp/mcmot-config.yaml"
+
+
+def test_mcmot_task_builds_global_map_renderer_from_visual_config(monkeypatch) -> None:
+    fake_state: dict[str, object] = {}
+    monkeypatch.setitem(sys.modules, "mcmot", _build_fake_mcmot_module(fake_state))
+
+    vis_cfg = GlobalMapVisualizationConfig(
+        map={
+            "image_path": "/tmp/global-map.png",
+            "width_meters": 10.0,
+            "height_meters": 5.0,
+        },
+        render={
+            "mode": "write",
+            "output_dir": "/tmp/global-map-output",
+        },
+        cameras=[
+            {
+                "camera_id": "camera_1",
+                "display_name": "Camera 1",
+                "aliases": ["cam01", "edge_cam01"],
+            }
+        ],
+    )
+
+    context = DummyContext(
+        config=SimpleNamespace(
+            mcmot_enabled=True,
+            mcmot_config_path="/tmp/mcmot-config.yaml",
+            global_map_visualization_enabled=True,
+            global_map_visualization=vis_cfg,
+        ),
+        resources={
+            "edge_events": [
+                {
+                    "camera_id": "cam01",
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "detections": [
+                        {
+                            "local_id": 7,
+                            "class_name": "person",
+                            "score": 0.95,
+                            "bbox": [10, 20, 30, 40],
+                        }
+                    ],
+                }
+            ]
+        },
+    )
+
+    task = MCMOTTask()
+    result = task.execute(context)
+
+    assert result.status == "mc_mot_done"
+    assert context.get_resource("global_map_renderer") is not None

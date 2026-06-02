@@ -1,16 +1,18 @@
 """Rendering helpers for drawing MC-MOT results on the global warehouse map."""
 from __future__ import annotations
 
+import colorsys
+import hashlib
+import math
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Iterable, List, Mapping, Sequence, Tuple
+from typing import Iterable, List, Mapping, Tuple
 
 import cv2  # type: ignore[import]
 import numpy as np
 
-from integration.config.settings import GlobalMapVisualizationConfig
-from integration.mcmot.config.schema import CameraConfig, MapConfig
+from integration.config.visualization import GlobalMapVisualizationConfig
 
 
 @dataclass
@@ -19,23 +21,11 @@ class OverlayResult:
     rendered: np.ndarray | None
 
 
-_DEFAULT_CLASS_PALETTE: Dict[str, tuple[int, int, int]] = {
+_DEFAULT_CLASS_PALETTE: dict[str, tuple[int, int, int]] = {
     "person": (0, 255, 0),
     "stacker": (0, 165, 255),
     "forklift": (0, 128, 255),
 }
-
-_CAMERA_COLOR_PALETTE: Sequence[tuple[int, int, int]] = (
-    (0, 128, 255),
-    (255, 128, 0),
-    (128, 0, 255),
-    (0, 255, 255),
-    (255, 0, 128),
-    (0, 255, 128),
-    (255, 255, 0),
-    (255, 0, 0),
-    (0, 0, 255),
-)
 
 
 class GlobalMapRenderer:
@@ -43,46 +33,45 @@ class GlobalMapRenderer:
 
     def __init__(
         self,
-        map_cfg: MapConfig,
         vis_cfg: GlobalMapVisualizationConfig,
         *,
         logger,
-        camera_configs: Sequence[CameraConfig] | None = None,
     ) -> None:
-        self._map_cfg = map_cfg
         self._vis_cfg = vis_cfg
         self._logger = logger
-        self._camera_cfgs = list(camera_configs or [])
-        self._allowed_cameras = set(vis_cfg.local_camera_ids)
+        self._map_cfg = vis_cfg.map
+        self._render_cfg = vis_cfg.render
+        self._camera_cfgs = list(vis_cfg.cameras)
+        self._allowed_cameras = {camera.camera_id for camera in self._camera_cfgs}
         self._base_canvas: np.ndarray | None = None
         self._image_mtime: float | None = None
-        self._camera_colors: Dict[str, tuple[int, int, int]] = {}
-        self._camera_alias_lookup: Dict[str, str] = {}
-        self._legend_entries: List[Tuple[str, str, tuple[int, int, int]]] = []
-        self._min_map_dim = min(self._map_cfg.pixel_width, self._map_cfg.pixel_height)
-        self._global_radius, self._local_radius = self._compute_radii()
-        self._global_font_scale, self._global_label_thickness = self._compute_font_params(
-            self._global_radius,
-        )
-        self._local_font_scale, self._local_label_thickness = self._compute_font_params(
-            self._local_radius,
-            scale_bias=0.85,
-        )
+        self._meters_per_pixel_x = 1.0
+        self._meters_per_pixel_y = 1.0
+        self._global_radius = 4
+        self._local_radius = 2
+        self._global_font_scale = 0.5
+        self._global_label_thickness = 1
+        self._local_font_scale = 0.5
+        self._local_label_thickness = 1
+        self._camera_colors: dict[str, tuple[int, int, int]] = {}
+        self._camera_lookup: dict[str, str] = {}
+        self._legend_entries: list[tuple[str, str, tuple[int, int, int]]] = []
+        self._legend_ids: set[str] = set()
+        self._seen_global_classes: list[str] = []
+        self._seen_global_class_set: set[str] = set()
         self._build_camera_color_map()
-        self._palette_cursor = len(self._legend_entries)
 
     def render(
         self,
         global_objects: Iterable[Mapping],
         local_objects: Iterable[Mapping],
     ) -> OverlayResult | None:
-        if not self._vis_cfg.enabled:
-            return None
         canvas = self._load_base_canvas()
         if canvas is None:
             return None
-        rendered = canvas.copy()
+        self._configure_canvas(canvas.shape[:2])
 
+        rendered = canvas.copy()
         global_list = list(global_objects)
         local_list = list(local_objects)
 
@@ -90,7 +79,7 @@ class GlobalMapRenderer:
         local_payload = self._prepare_local_overlay_objects(local_list, global_list)
         local_count, used_cameras = self._draw_local_objects(rendered, local_payload)
 
-        if self._vis_cfg.show_legend:
+        if self._render_cfg.show_legend:
             self._draw_legend(rendered, focus_cameras=used_cameras)
 
         saved_path = self._finalize(rendered)
@@ -120,13 +109,22 @@ class GlobalMapRenderer:
             self._image_mtime = mtime
         return self._base_canvas
 
-    def _compute_radii(self) -> tuple[int, int]:
-        min_dim = max(1, self._min_map_dim)
-        global_dynamic = int(min_dim * max(0.0, self._vis_cfg.global_radius_ratio))
-        global_radius = max(self._vis_cfg.marker_radius, global_dynamic, 4)
-        local_dynamic = int(min_dim * max(0.0, self._vis_cfg.local_radius_ratio))
-        local_radius = max(2, min(global_radius - 2, local_dynamic or global_radius // 2))
-        return global_radius, max(2, local_radius)
+    def _configure_canvas(self, shape: tuple[int, int]) -> None:
+        height, width = shape
+        min_dim = max(1, min(height, width))
+        global_dynamic = int(min_dim * max(0.0, self._render_cfg.global_radius_ratio))
+        self._global_radius = max(self._render_cfg.marker_radius, global_dynamic, 4)
+        local_dynamic = int(min_dim * max(0.0, self._render_cfg.local_radius_ratio))
+        self._local_radius = max(2, min(self._global_radius - 2, local_dynamic or self._global_radius // 2))
+        self._global_font_scale, self._global_label_thickness = self._compute_font_params(
+            self._global_radius,
+        )
+        self._local_font_scale, self._local_label_thickness = self._compute_font_params(
+            self._local_radius,
+            scale_bias=0.85,
+        )
+        self._meters_per_pixel_x = self._map_cfg.width_meters / float(max(1, width))
+        self._meters_per_pixel_y = self._map_cfg.height_meters / float(max(1, height))
 
     def _draw_global_objects(
         self,
@@ -139,13 +137,17 @@ class GlobalMapRenderer:
             if coords is None:
                 continue
             x, y = int(round(coords[0])), int(round(coords[1]))
-            color = self._color_for_global(obj.get("class_name"))
+            class_name = obj.get("class_name")
+            color = self._color_for_global(class_name)
             cv2.circle(canvas, (x, y), self._global_radius, color, thickness=-1)
             label_parts: List[str] = []
-            if self._vis_cfg.show_global_id and obj.get("global_id") is not None:
+            if class_name and class_name not in self._seen_global_class_set:
+                self._seen_global_class_set.add(str(class_name))
+                self._seen_global_classes.append(str(class_name))
+            if self._render_cfg.show_global_id and obj.get("global_id") is not None:
                 label_parts.append(str(obj.get("global_id")))
-            if self._vis_cfg.show_class_name and obj.get("class_name"):
-                label_parts.append(str(obj.get("class_name")))
+            if self._render_cfg.show_class_name and class_name:
+                label_parts.append(str(class_name))
             if label_parts:
                 cv2.putText(
                     canvas,
@@ -164,19 +166,18 @@ class GlobalMapRenderer:
         self,
         local_objects: Iterable[Mapping],
         global_objects: Iterable[Mapping],
-    ) -> List[Dict]:
+    ) -> List[dict]:
         global_lookup = {
             obj.get("global_id"): obj for obj in global_objects if obj.get("global_id") is not None
         }
-        prepared: List[Dict] = []
+        prepared: List[dict] = []
         for item in local_objects:
             camera_id = item.get("camera_id")
             if not camera_id:
                 continue
-            canonical_id = self._camera_alias_lookup.get(camera_id, camera_id)
-            if self._allowed_cameras:
-                if camera_id not in self._allowed_cameras and canonical_id not in self._allowed_cameras:
-                    continue
+            canonical_id = self._camera_lookup.get(str(camera_id), str(camera_id))
+            if self._allowed_cameras and camera_id not in self._allowed_cameras and canonical_id not in self._allowed_cameras:
+                continue
             coords = self._coerce_point(item.get("global_position"))
             if coords is None:
                 continue
@@ -189,10 +190,10 @@ class GlobalMapRenderer:
                     if ref_xy is not None:
                         dx = coords[0] - ref_xy[0]
                         dy = coords[1] - ref_xy[1]
-                        distance_m = self._map_cfg.distance_in_meters(dx, dy)
+                        distance_m = self._distance_in_meters(dx, dy)
             prepared.append(
                 {
-                    "camera_id": camera_id,
+                    "camera_id": str(camera_id),
                     "canonical_id": canonical_id,
                     "local_id": item.get("local_id"),
                     "global_id": global_id,
@@ -205,17 +206,13 @@ class GlobalMapRenderer:
     def _draw_local_objects(
         self,
         canvas: np.ndarray,
-        local_objects: List[Dict],
+        local_objects: List[dict],
     ) -> tuple[int, set[str]]:
         rendered = 0
         used_cameras: set[str] = set()
         for obj in local_objects:
             point = obj["point"]
-            color = self._camera_colors.get(obj["camera_id"]) or self._camera_colors.get(
-                obj["canonical_id"],
-            )
-            if color is None:
-                color = self._assign_fallback_color(obj["camera_id"])
+            color = self._color_for_camera(obj["camera_id"], obj["canonical_id"])
             x = int(round(point[0]))
             y = int(round(point[1]))
             cv2.circle(canvas, (x, y), self._local_radius, color, thickness=-1)
@@ -315,10 +312,10 @@ class GlobalMapRenderer:
 
     def _finalize(self, rendered: np.ndarray) -> Path | None:
         saved_path: Path | None = None
-        mode = self._vis_cfg.mode
+        mode = self._render_cfg.mode
         timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
         if mode in {"write", "both"}:
-            output_dir = Path(self._vis_cfg.output_dir)
+            output_dir = Path(self._render_cfg.output_dir)
             output_dir.mkdir(parents=True, exist_ok=True)
             saved_path = output_dir / f"global_map_{timestamp}.png"
             cv2.imwrite(str(saved_path), rendered)
@@ -326,43 +323,75 @@ class GlobalMapRenderer:
 
         if mode in {"show", "both"}:
             try:
-                cv2.imshow(self._vis_cfg.window_name, rendered)
+                cv2.imshow(self._render_cfg.window_name, rendered)
                 cv2.waitKey(1)
             except cv2.error as exc:  # pragma: no cover
                 self._logger.warning("無法顯示全局地圖視窗：%s", exc)
         return saved_path
 
     def _build_camera_color_map(self) -> None:
-        palette_index = 0
         for camera in self._camera_cfgs:
-            color = self._parse_color(camera.color_hex)
-            if color is None:
-                color = _CAMERA_COLOR_PALETTE[palette_index % len(_CAMERA_COLOR_PALETTE)]
-                palette_index += 1
-            display_name = camera.name or camera.camera_id
-            self._legend_entries.append((camera.camera_id, display_name, color))
+            color = self._stable_color_from_key(f"camera:{camera.camera_id}")
+            display_name = camera.display_name or camera.camera_id
+            self._register_camera_entry(camera.camera_id, display_name, color)
             self._camera_colors[camera.camera_id] = color
-            self._camera_alias_lookup[camera.camera_id] = camera.camera_id
-            edge_id = camera.edge_id or camera.camera_id
-            self._camera_colors[edge_id] = color
-            self._camera_alias_lookup[edge_id] = camera.camera_id
+            self._camera_lookup[camera.camera_id] = camera.camera_id
+            for alias in camera.aliases:
+                self._camera_lookup[alias] = camera.camera_id
+                self._camera_colors[alias] = color
+
+    def _register_camera_entry(
+        self,
+        camera_id: str,
+        display_name: str,
+        color: tuple[int, int, int],
+    ) -> None:
+        if camera_id in self._legend_ids:
+            return
+        self._legend_ids.add(camera_id)
+        self._legend_entries.append((camera_id, display_name, color))
+
+    def _color_for_camera(self, raw_camera_id: str, canonical_camera_id: str | None = None) -> tuple[int, int, int]:
+        canonical_id = canonical_camera_id or self._camera_lookup.get(raw_camera_id, raw_camera_id)
+        color = self._camera_colors.get(raw_camera_id) or self._camera_colors.get(canonical_id)
+        if color is not None:
+            return color
+        color = self._stable_color_from_key(f"camera:{canonical_id}")
+        self._camera_colors[canonical_id] = color
+        self._camera_colors[raw_camera_id] = color
+        self._camera_lookup[raw_camera_id] = canonical_id
+        self._register_camera_entry(canonical_id, canonical_id, color)
+        return color
 
     def _color_for_global(self, class_name: str | None) -> tuple[int, int, int]:
-        if class_name and class_name in self._vis_cfg.class_colors:
-            return self._vis_cfg.class_colors[class_name]
-        if self._vis_cfg.global_color is not None:
-            return self._vis_cfg.global_color
         if class_name and class_name in _DEFAULT_CLASS_PALETTE:
             return _DEFAULT_CLASS_PALETTE[class_name]
+        if class_name:
+            return self._stable_color_from_key(f"class:{class_name}")
         return (255, 255, 255)
 
-    def _assign_fallback_color(self, camera_id: str) -> tuple[int, int, int]:
-        color = _CAMERA_COLOR_PALETTE[self._palette_cursor % len(_CAMERA_COLOR_PALETTE)]
-        self._palette_cursor += 1
-        self._camera_colors[camera_id] = color
-        self._camera_alias_lookup[camera_id] = camera_id
-        self._legend_entries.append((camera_id, camera_id, color))
-        return color
+    def _distance_in_meters(self, dx_pixels: float, dy_pixels: float) -> float:
+        return math.hypot(dx_pixels * self._meters_per_pixel_x, dy_pixels * self._meters_per_pixel_y)
+
+    def _build_global_legend(self) -> List[Tuple[str, tuple[int, int, int]]]:
+        if self._seen_global_classes:
+            return [
+                (class_name, self._color_for_global(class_name))
+                for class_name in self._seen_global_classes
+            ]
+        return list(_DEFAULT_CLASS_PALETTE.items())
+
+    def _build_camera_legend(self, focus_cameras: set[str]) -> List[Tuple[str, str, tuple[int, int, int]]]:
+        entries: List[Tuple[str, str, tuple[int, int, int]]] = []
+        ordered_entries = list(self._legend_entries)
+        if focus_cameras:
+            ordered_entries = sorted(
+                ordered_entries,
+                key=lambda entry: (entry[0] not in focus_cameras, entry[0]),
+            )
+        for camera_id, display_name, color in ordered_entries:
+            entries.append(("item", display_name, color))
+        return entries
 
     @staticmethod
     def _coerce_point(value: Mapping | None) -> tuple[float, float] | None:
@@ -399,19 +428,17 @@ class GlobalMapRenderer:
             return None
 
     @staticmethod
-    def _parse_color(value: str | None) -> tuple[int, int, int] | None:
-        if not value:
-            return None
-        hex_value = value.strip().lstrip("#")
-        if len(hex_value) != 6:
-            return None
-        try:
-            r = int(hex_value[0:2], 16)
-            g = int(hex_value[2:4], 16)
-            b = int(hex_value[4:6], 16)
-        except ValueError:
-            return None
-        return (b, g, r)
+    def _stable_color_from_key(key: str) -> tuple[int, int, int]:
+        digest = hashlib.sha1(key.encode("utf-8")).digest()
+        hue = digest[0] / 255.0
+        saturation = 0.65 + (digest[1] / 255.0) * 0.2
+        value = 0.85 + (digest[2] / 255.0) * 0.1
+        red, green, blue = colorsys.hsv_to_rgb(hue, min(saturation, 1.0), min(value, 1.0))
+        return (
+            int(round(blue * 255)),
+            int(round(green * 255)),
+            int(round(red * 255)),
+        )
 
     def _compute_font_params(
         self,
@@ -419,28 +446,12 @@ class GlobalMapRenderer:
         *,
         scale_bias: float = 1.0,
     ) -> tuple[float, int]:
-        base_scale = max(0.3, self._vis_cfg.label_font_scale)
+        base_scale = max(0.3, self._render_cfg.label_font_scale)
         dynamic_scale = max(0.3, radius / 14.0)
         scale = max(base_scale, dynamic_scale * scale_bias)
-        base_thickness = max(1, self._vis_cfg.label_thickness)
+        base_thickness = max(1, self._render_cfg.label_thickness)
         dynamic_thickness = max(1, int(round(radius / 8)))
         return scale, max(base_thickness, dynamic_thickness)
-
-    def _build_global_legend(self) -> List[Tuple[str, tuple[int, int, int]]]:
-        palette: List[Tuple[str, tuple[int, int, int]]] = []
-        source = self._vis_cfg.class_colors or _DEFAULT_CLASS_PALETTE
-        for class_name, color in source.items():
-            palette.append((class_name, color))
-        if not palette:
-            palette.append(("Global", self._color_for_global(None)))
-        return palette
-
-    def _build_camera_legend(self, focus_cameras: set[str]) -> List[Tuple[str, str, tuple[int, int, int]]]:
-        # Legend 需完整顯示所有 camera/canonical 顏色，避免因當前畫面無物件而缺漏
-        entries: List[Tuple[str, str, tuple[int, int, int]]] = []
-        for camera_id, display_name, color in self._legend_entries:
-            entries.append(("item", display_name, color))
-        return entries
 
 
 __all__ = ["OverlayResult", "GlobalMapRenderer"]

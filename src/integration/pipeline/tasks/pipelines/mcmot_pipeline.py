@@ -86,10 +86,6 @@ class MCMOTPipelineTask(QuietTaskBase):
             getattr(getattr(config, "ingestion_task", None), "engine_class", None),
             "DefaultIngestionEngine",
         )
-        tracking_handler = _class_name(
-            getattr(getattr(config, "tracking_task", None), "engine_class", None),
-            "DefaultTrackingHandler",
-        )
         format_engine = _class_name(
             getattr(getattr(config, "format_task", None), "strategy_class", None),
             "DefaultFormatEngine",
@@ -105,7 +101,7 @@ class MCMOTPipelineTask(QuietTaskBase):
 
         return (
             f"IngestionTask(engine={ingestion_handler}) -> "
-            f"MCMOTTask(handler={tracking_handler}, engine=MCMOTEngine) -> "
+            f"MCMOTTask(engine=MCMOTEngine) -> "
             f"FormatConversionTask(strategy={format_engine}) -> "
             f"RuleEvaluationTask(engine={rules_engine}) -> "
             f"EventDispatchTask(engine={dispatch_engine})"

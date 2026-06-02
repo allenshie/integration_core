@@ -55,17 +55,10 @@ class EventDispatchTask(QuietTaskBase):
 
     def _init_engine(self, cfg, context: TaskContext | None) -> BaseEventDispatchEngine:
         engine_path = getattr(cfg, "engine_class", None) if cfg else None
-        if not engine_path:
-            return DefaultEventDispatchEngine(context=context)
-        try:
-            engine_cls = load_event_dispatch_engine(engine_path)
-        except Exception as exc:  # pylint: disable=broad-except
-            raise TaskError(f"無法載入事件派送 Engine：{engine_path}") from exc
-
-        try:
-            return engine_cls(context=context)
-        except TypeError:
-            try:
-                return engine_cls()
-            except TypeError as exc:  # pragma: no cover
-                raise TaskError(f"事件派送 Engine {engine_path} 無法初始化") from exc
+        return self._init_plugin(
+            plugin_name="事件派送 Engine",
+            loader=load_event_dispatch_engine,
+            plugin_path=engine_path,
+            default_factory=lambda: DefaultEventDispatchEngine(context=context),
+            init_kwargs={"context": context},
+        )

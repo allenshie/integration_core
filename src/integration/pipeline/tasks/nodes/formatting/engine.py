@@ -1,13 +1,13 @@
 """Engine objects for formatting MC-MOT output."""
 from __future__ import annotations
 
-import inspect
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
-from importlib import import_module
 from typing import Any, Dict, Iterable, Type
 
-from smart_workflow import TaskContext, TaskError
+from smart_workflow import TaskContext
+
+from integration.pipeline.tasks.plugin_loader import load_plugin_class
 
 from .expect_output import ExpectOutputTransformer
 
@@ -189,17 +189,4 @@ class DefaultFormatEngine(BaseFormatEngine):
 
 
 def load_format_engine(path: str) -> Type[BaseFormatEngine]:
-    if ":" in path:
-        module_name, class_name = path.split(":", 1)
-    elif "." in path:
-        module_name, class_name = path.rsplit(".", 1)
-    else:
-        raise TaskError(f"無法解析格式策略路徑：{path}")
-
-    module = import_module(module_name)
-    attr = getattr(module, class_name, None)
-    if attr is None or not inspect.isclass(attr):
-        raise TaskError(f"在模組 {module_name} 找不到格式策略 {class_name}")
-    if not issubclass(attr, BaseFormatEngine):
-        raise TaskError(f"{class_name} 必須繼承 BaseFormatEngine")
-    return attr
+    return load_plugin_class(path, BaseFormatEngine, "格式策略")

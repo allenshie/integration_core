@@ -1,13 +1,13 @@
-"""Wrapper around the vendored MC-MOT coordinator."""
+"""Adapter around the external MCMOT package."""
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Sequence
 
-from integration.mcmot.config.schema import BaseConfig as MCMOTConfig
-from integration.mcmot.services.mcmot_coordinator import MCMOTCoordinator
+from integration.utils.paths import get_config_root
 
 
 @dataclass
@@ -17,33 +17,63 @@ class MCMOTResult:
 
 
 class MCMOTEngine:
-    """Adapter that feeds integration events into the MC-MOT coordinator."""
+    """Adapter that feeds integration events into the external MCMOT engine."""
 
-    def __init__(self, config: MCMOTConfig, logger: logging.Logger | None = None) -> None:
+    def __init__(self, config: str | None = None, logger: logging.Logger | None = None) -> None:
         self._log = logger or logging.getLogger("mcmot.engine")
-        self._config = config
-        self._coordinator = MCMOTCoordinator(config=config)
-        self._log.info("MC-MOT coordinator ready with %d cameras", len(config.cameras))
+        self._config_path = self._resolve_config_path(config)
+        self._engine = self._initialize_engine(self._config_path)
+        self.config = self._engine.config
+        camera_count = len(getattr(self.config, "cameras", []) or [])
+        self._log.info("MC-MOT engine ready with %d cameras", camera_count)
 
     def process_events(self, events: Iterable[Dict[str, Any]]) -> MCMOTResult:
+        events_list = list(events)
         tracked_payload: List[Dict[str, Any]] = []
-        for event in events:
-            camera_id = event.get("camera_id")
+        latest_timestamp: datetime | None = None
+
+        for event in events_list:
             timestamp = self._ensure_timestamp(event.get("timestamp"))
+            if latest_timestamp is None or timestamp > latest_timestamp:
+                latest_timestamp = timestamp
+
+            camera_id = event.get("camera_id")
             detections = self._build_detections(event.get("detections") or [])
             if not camera_id or not detections:
                 continue
-            tracked = self._coordinator.process_detected_objects(
-                detected_objects=detections,
+
+            tracked = self._engine.process_detected_objects(
                 camera_id=camera_id,
                 timestamp=timestamp,
+                detected_objects=detections,
             )
             if tracked:
                 tracked_payload.extend(self._serialize_tracked(camera_id, tracked))
 
-        self._coordinator.finalize_global_updates()
-        global_objects = [self._serialize_global(obj) for obj in self._coordinator.get_all_global_objects()]
+        finalize_timestamp = latest_timestamp or datetime.now(timezone.utc)
+        self._engine.finalize_global_updates(finalize_timestamp)
+        global_objects = [self._serialize_global(obj) for obj in self._engine.get_all_global_objects()]
         return MCMOTResult(tracked_objects=tracked_payload, global_objects=global_objects)
+
+    def _initialize_engine(self, config_path: str | None):
+        try:
+            from mcmot import MCMOT as EngineClass
+        except ModuleNotFoundError as exc:
+            raise RuntimeError(
+                "MCMOT package is required when MC-MOT is enabled. "
+                "Install the MCMOT submodule before enabling tracking.",
+            ) from exc
+
+        return EngineClass(config=config_path)
+
+    @staticmethod
+    def _resolve_config_path(raw: str | None) -> str | None:
+        if raw is None or not str(raw).strip():
+            return None
+        path = Path(raw).expanduser()
+        if not path.is_absolute():
+            path = (get_config_root() / path).resolve()
+        return str(path)
 
     def _build_detections(self, detections: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
         formatted: List[Dict[str, Any]] = []
@@ -57,7 +87,11 @@ class MCMOTEngine:
             class_name = det.get("class_name") or det.get("label")
             if class_name is None:
                 continue
-            score = det.get("score") or det.get("confidence") or 0.0
+            score = det.get("score")
+            if score is None:
+                score = det.get("confidence")
+            if score is None:
+                score = 0.0
             formatted.append(
                 {
                     "class_name": class_name,

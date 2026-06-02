@@ -1,50 +1,51 @@
 """MC-MOT integration stage."""
 from __future__ import annotations
 
-from smart_workflow import TaskContext, TaskResult, TaskError
+from smart_workflow import TaskContext, TaskResult
 
-from integration.mcmot.visualization.map_overlay import GlobalMapRenderer, OverlayResult
 from integration.pipeline.tasks.base import QuietTaskBase
 from integration.pipeline.tasks.summary import MC_MOT_STATS_RESOURCE, store_stage_stats
 from integration.pipeline.tasks.nodes.tracking.engine import MCMOTEngine
-from .handler import BaseTrackingHandler, DefaultTrackingHandler, load_tracking_handler
+from integration.visualization import GlobalMapRenderer, OverlayResult
 
 
 class MCMOTTask(QuietTaskBase):
     name = "mc_mot"
 
     def __init__(self, context: TaskContext | None = None) -> None:
-        self._handler: BaseTrackingHandler | None = None
+        self._engine: MCMOTEngine | None = None
 
     def run(self, context: TaskContext) -> TaskResult:
-        if self._handler is None:
-            if context is not None:
-                self._ensure_engine(context)
-            self._handler = self._init_handler(context)
-        events = context.get_resource("edge_events") or []
+        events = list(context.get_resource("edge_events") or [])
+        processed_events = len(events)
         if not context.config.mcmot_enabled:
             store_stage_stats(
                 context,
                 MC_MOT_STATS_RESOURCE,
                 {
-                    "events": len(events),
+                    "events": processed_events,
                     "tracked": 0,
                     "global": 0,
                 },
             )
-            context.logger.debug("MC-MOT 已停用，略過 %d 筆事件", len(events))
+            context.logger.debug("MC-MOT 已停用，略過 %d 筆事件", processed_events)
             context.set_resource("mc_mot_tracked", [])
             context.set_resource("mc_mot_global_objects", [])
             return TaskResult(status="mc_mot_skipped")
 
-        result = self._handler.process(context, events)
+        if self._engine is None:
+            self._engine = self._init_engine(context)
+        context.set_resource("mcmot_engine", self._engine)
+        self._ensure_global_map_renderer(context)
+
+        result = self._engine.process_events(events)
         context.set_resource("mc_mot_tracked", result.tracked_objects)
         context.set_resource("mc_mot_global_objects", result.global_objects)
         store_stage_stats(
             context,
             MC_MOT_STATS_RESOURCE,
             {
-                "events": result.processed_events,
+                "events": processed_events,
                 "tracked": len(result.tracked_objects),
                 "global": len(result.global_objects),
             },
@@ -54,14 +55,14 @@ class MCMOTTask(QuietTaskBase):
 
         context.logger.debug(
             "MC-MOT 處理 %d 筆事件，產生 %d 筆追蹤結果，維護 %d 筆全域物件",
-            result.processed_events,
+            processed_events,
             len(result.tracked_objects),
             len(result.global_objects),
         )
         return TaskResult(
             status="mc_mot_done",
             payload={
-                "events": result.processed_events,
+                "events": processed_events,
                 "tracked": len(result.tracked_objects),
                 "global_objects": len(result.global_objects),
             },
@@ -78,45 +79,39 @@ class MCMOTTask(QuietTaskBase):
         except Exception as exc:  # pylint: disable=broad-except
             context.logger.warning("全局地圖可視化失敗：%s", exc)
 
-    def _ensure_engine(self, context: TaskContext) -> None:
-        if not context.config.mcmot_enabled:
-            return
-        if context.get_resource("mcmot_engine") is None:
-            if context.config.mcmot is None:
-                raise TaskError("MC-MOT 已啟用但設定未載入")
-            engine = MCMOTEngine(config=context.config.mcmot, logger=context.logger)
-            context.set_resource("mcmot_engine", engine)
+    def _init_engine(self, context: TaskContext | None) -> MCMOTEngine:
+        config_path = getattr(context.config, "mcmot_config_path", None) if context else None
+        engine = self._init_plugin(
+            plugin_name="MC-MOT 引擎",
+            plugin_cls=MCMOTEngine,
+            init_kwargs={"config": config_path, "logger": context.logger if context else None},
+        )
+        if context is not None:
             context.logger.info("MC-MOT engine initialized")
+        return engine
 
-        if context.get_resource("global_map_renderer") is None:
-            vis_cfg = getattr(context.config, "global_map_visualization", None)
-            if vis_cfg and vis_cfg.enabled:
-                map_cfg = context.config.mcmot.map if context.config.mcmot else None
-                if map_cfg is None:
-                    context.logger.warning("啟用了全局可視化但 mcmot map 未設定")
-                    return
-                renderer = GlobalMapRenderer(
-                    map_cfg=map_cfg,
-                    vis_cfg=vis_cfg,
-                    logger=context.logger,
-                    camera_configs=context.config.mcmot.cameras,
-                )
-                context.set_resource("global_map_renderer", renderer)
-                context.logger.info("Global map renderer initialized")
+    def _ensure_global_map_renderer(self, context: TaskContext) -> None:
+        if context.get_resource("global_map_renderer") is not None:
+            return
+        if not self._is_global_map_visualization_enabled(context):
+            return
+        vis_cfg = getattr(context.config, "global_map_visualization", None)
+        if vis_cfg is None:
+            context.logger.warning("已啟用全局可視化但未載入視覺化設定")
+            return
+        renderer = GlobalMapRenderer(
+            vis_cfg=vis_cfg,
+            logger=context.logger,
+        )
+        context.set_resource("global_map_renderer", renderer)
+        context.logger.info("Global map renderer initialized")
 
-    def _init_handler(self, context: TaskContext | None) -> BaseTrackingHandler:
-        cfg = getattr(context.config, "tracking_task", None) if context else None
-        handler_path = getattr(cfg, "engine_class", None) if cfg else None
-        if not handler_path:
-            return DefaultTrackingHandler(context=context)
-        try:
-            handler_cls = load_tracking_handler(handler_path)
-        except Exception as exc:  # pylint: disable=broad-except
-            raise TaskError(f"無法載入 Tracking Handler：{handler_path}") from exc
-        try:
-            return handler_cls(context=context)
-        except TypeError:
-            try:
-                return handler_cls()
-            except TypeError as exc:  # pragma: no cover
-                raise TaskError(f"Tracking Handler {handler_path} 無法初始化") from exc
+    @staticmethod
+    def _is_global_map_visualization_enabled(context: TaskContext) -> bool:
+        enabled = getattr(context.config, "global_map_visualization_enabled", None)
+        if enabled is not None:
+            return bool(enabled)
+        vis_cfg = getattr(context.config, "global_map_visualization", None)
+        if vis_cfg is None:
+            return False
+        return bool(getattr(vis_cfg, "enabled", False))

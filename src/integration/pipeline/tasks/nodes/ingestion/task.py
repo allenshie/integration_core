@@ -1,7 +1,7 @@
 """Ingestion stage task."""
 from __future__ import annotations
 
-from smart_workflow import TaskContext, TaskResult, TaskError
+from smart_workflow import TaskContext, TaskResult
 
 from integration.pipeline.tasks.base import QuietTaskBase
 from integration.pipeline.tasks.summary import INGESTION_STATS_RESOURCE, store_stage_stats
@@ -50,16 +50,10 @@ class IngestionTask(QuietTaskBase):
     def _init_engine(self, context: TaskContext | None) -> BaseIngestionEngine:
         cfg = getattr(context.config, "ingestion_task", None) if context else None
         engine_path = getattr(cfg, "engine_class", None) if cfg else None
-        if not engine_path:
-            return DefaultIngestionEngine(context=context)
-        try:
-            engine_cls = load_ingestion_engine(engine_path)
-        except Exception as exc:  # pylint: disable=broad-except
-            raise TaskError(f"無法載入 Ingestion Engine：{engine_path}") from exc
-        try:
-            return engine_cls(context=context)
-        except TypeError:
-            try:
-                return engine_cls()
-            except TypeError as exc:  # pragma: no cover
-                raise TaskError(f"Ingestion Engine {engine_path} 無法初始化") from exc
+        return self._init_plugin(
+            plugin_name="Ingestion Engine",
+            loader=load_ingestion_engine,
+            plugin_path=engine_path,
+            default_factory=lambda: DefaultIngestionEngine(context=context),
+            init_kwargs={"context": context},
+        )

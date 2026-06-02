@@ -1,7 +1,7 @@
 """Normalize MC-MOT output for downstream rules."""
 from __future__ import annotations
 
-from smart_workflow import TaskContext, TaskError, TaskResult
+from smart_workflow import TaskContext, TaskResult
 
 from integration.pipeline.tasks.base import QuietTaskBase
 from integration.pipeline.tasks.summary import FORMAT_STATS_RESOURCE, store_stage_stats
@@ -55,18 +55,10 @@ class FormatConversionTask(QuietTaskBase):
         tz = getattr(context.config, "timezone", None) if context else None
         cfg = getattr(context.config, "format_task", None) if context else None
         engine_path = getattr(cfg, "strategy_class", None)
-        if not engine_path:
-            return DefaultFormatEngine(timezone_override=tz)
-
-        try:
-            strategy_cls = load_format_engine(engine_path)
-        except Exception as exc:  # pylint: disable=broad-except
-            raise TaskError(f"無法載入格式引擎：{engine_path}") from exc
-
-        try:
-            return strategy_cls(context=context)
-        except TypeError:
-            try:
-                return strategy_cls()
-            except TypeError as exc:  # pragma: no cover - fall back error
-                raise TaskError(f"格式引擎 {engine_path} 無法初始化") from exc
+        return self._init_plugin(
+            plugin_name="格式引擎",
+            loader=load_format_engine,
+            plugin_path=engine_path,
+            default_factory=lambda: DefaultFormatEngine(timezone_override=tz),
+            init_kwargs={"context": context},
+        )

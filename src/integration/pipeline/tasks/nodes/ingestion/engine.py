@@ -1,14 +1,14 @@
 """Ingestion engine implementations."""
 from __future__ import annotations
 
-import inspect
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from importlib import import_module
 from typing import Any, Dict, List, Type
 
-from smart_workflow import TaskContext, TaskError
+from smart_workflow import TaskContext
+
+from integration.pipeline.tasks.plugin_loader import load_plugin_class
 
 
 @dataclass
@@ -97,17 +97,4 @@ class DefaultIngestionEngine(BaseIngestionEngine):
 
 
 def load_ingestion_engine(path: str) -> Type[BaseIngestionEngine]:
-    if ":" in path:
-        module_name, class_name = path.split(":", 1)
-    elif "." in path:
-        module_name, class_name = path.rsplit(".", 1)
-    else:
-        raise TaskError(f"無法解析 Ingestion Engine 路徑：{path}")
-
-    module = import_module(module_name)
-    attr = getattr(module, class_name, None)
-    if attr is None or not inspect.isclass(attr):
-        raise TaskError(f"在模組 {module_name} 找不到 Ingestion Engine {class_name}")
-    if not issubclass(attr, BaseIngestionEngine):
-        raise TaskError(f"{class_name} 必須繼承 BaseIngestionEngine")
-    return attr
+    return load_plugin_class(path, BaseIngestionEngine, "Ingestion Engine")

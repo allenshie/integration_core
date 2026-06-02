@@ -1,21 +1,7 @@
 from __future__ import annotations
 
 import logging
-import sys
-from pathlib import Path
 from types import SimpleNamespace
-
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-SRC_ROOT = PROJECT_ROOT / "src"
-SMART_WORKFLOW_ROOT = Path(__file__).resolve().parents[3] / "test_space" / "smart-workflow"
-if str(SRC_ROOT) not in sys.path:
-    sys.path.insert(0, str(SRC_ROOT))
-if str(SMART_WORKFLOW_ROOT) not in sys.path:
-    sys.path.insert(0, str(SMART_WORKFLOW_ROOT))
-
-for module_name in list(sys.modules):
-    if module_name == "integration" or module_name.startswith("integration."):
-        sys.modules.pop(module_name)
 
 from smart_workflow import TaskResult
 
@@ -161,8 +147,13 @@ def test_pipeline_summary_logs_once_per_interval(caplog, monkeypatch) -> None:
     assert second_result.status == "mcmot_pipeline_done"
     assert "開始任務：mcmot_pipeline" not in caplog.text
     assert caplog.text.count("pipeline_summary window=60s phase=working status=ok") == 1
-    assert any(line.startswith("ingestion") for line in caplog.text.splitlines())
-    assert any(line.startswith("event_dispatch") for line in caplog.text.splitlines())
+    summary_record = next(
+        record.message
+        for record in caplog.records
+        if record.message.startswith("pipeline_summary window=60s phase=working status=ok")
+    )
+    assert any(line.startswith("ingestion") for line in summary_record.splitlines())
+    assert any(line.startswith("event_dispatch") for line in summary_record.splitlines())
 
 
 def test_pipeline_summary_interval_follows_config(caplog) -> None:
