@@ -9,7 +9,7 @@
 - [Edge 通訊 Adapter 開發](docs/EDGE_COMM_ADAPTER.md)
 - [Pipeline 排程設定](docs/CORE_WORKFLOW.md)
 - [部署指南（Docker/K8s）](docs/DEPLOYMENT.md)
-- [MC-MOT 模組說明](src/integration/mcmot/README.md)
+- [MC-MOT 外部專案說明](https://github.com/ChenPingChen/MCMOT)
 
 ## 快速開始
 
@@ -56,11 +56,23 @@ python main.py
 
 ## 安裝成套件（建議）
 
-若作為子模組或需要在 Docker/K8s 使用，建議安裝成套件（避免手動設定 PYTHONPATH）：
+若作為子模組或需要在 Docker/K8s 使用，建議安裝成套件（避免手動設定 PYTHONPATH）。
+透過 `pip install -e .` 安裝時，`pyproject.toml` 會一併安裝外部 `MCMOT` Git 依賴，因此不需要再另外安裝內建版本的 MC-MOT 模組。
+若需要啟用全局地圖視覺化，請參考 `data/config/global_map_vis.example.yaml`，再依環境另存為實際使用的視覺化設定檔，並在 `.env` 或啟動環境中明確設定 `GLOBAL_MAP_VIS_CONFIG_PATH`。
 
 ```bash
 cd integration
 pip install -e .
+```
+
+## 測試驗證
+
+若要驗證 `integration_core` 在安裝成套件後可正常載入外部 `MCMOT` 與相關依賴，可先安裝測試額外套件，再執行現有的 `test_mcmot_adapter`：
+
+```bash
+cd integration
+pip install -e ".[test]"
+pytest tests/test_mcmot_adapter.py -q
 ```
 
 ## 目錄結構

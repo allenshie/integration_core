@@ -35,7 +35,6 @@
 | --- | --- | --- |
 | `INGESTION_ENGINE_CLASS` | `-` | Ingestion engine 類別路徑（`module:Class`）。 |
 | `INGESTION_HANDLER_CLASS` | `-` | 舊鍵名；相容用途，建議改用 `INGESTION_ENGINE_CLASS`。 |
-| `TRACKING_ENGINE_CLASS` | `-` | Tracking handler 類別路徑（`module:Class`）。 |
 | `FORMAT_STRATEGY_CLASS` | `-` | Format engine 類別路徑（`module:Class`）。 |
 | `RULES_ENGINE_CLASS` | `-` | Rule engine 類別路徑（`module:Class`）。 |
 | `EVENT_DISPATCH_ENGINE_CLASS` | `-` | 事件派送 engine 類別路徑（`module:Class`）。 |
@@ -46,28 +45,52 @@
 
 - `MCMOT_ENABLED`：`0/1` 或 `true/false`。是否啟用 MC-MOT。預設 `1`。
 - `MCMOT_CONFIG_PATH`：字串路徑。MC-MOT 設定檔位置（相對於 integration root）。
+- 目前 MC-MOT 由外部 `MCMOT` Git 套件提供，`integration_core` 不再內建對應模組，也不再提供本地範例設定檔。
+- 設定檔內的相對路徑由 `MCMOT` 套件自行以設定檔所屬專案根目錄為基準解析。
+- MC-MOT 的執行實體固定為 `MCMOTEngine`，不再提供 tracking handler 類別覆寫。
 
 ## 視覺化（可選）
 
-只有需要輸出全域地圖時才需設定下列變數。
+全域地圖視覺化已從 `MCMOT` 子模組分離，`integration_core` 只負責自己的視覺化設定。
+啟用後，`load_config()` 會先讀取 `GLOBAL_MAP_VIS_CONFIG_PATH` 指向的 YAML，再建出 `GlobalMapVisualizationConfig` 並掛到 `AppConfig` 上。
+範例檔可參考 `data/config/global_map_vis.example.yaml`。
 
 | 變數 | 預設 | 說明 |
 | --- | --- | --- |
 | `GLOBAL_MAP_VIS_ENABLED` | `0` | 是否啟用全域地圖視覺化。 |
-| `GLOBAL_MAP_VIS_MODE` | `write` | 輸出模式：`write`、`show` 或 `both`。 |
-| `GLOBAL_MAP_VIS_OUTPUT` | `output/global_map` | 輸出資料夾路徑。 |
-| `GLOBAL_MAP_VIS_WINDOW` | `global-map` | 視窗名稱。 |
-| `GLOBAL_MAP_VIS_RADIUS` | `6` | 標記半徑，單位像素。 |
-| `GLOBAL_MAP_VIS_LABEL_SCALE` | `0.5` | 標籤字型縮放。 |
-| `GLOBAL_MAP_VIS_LABEL_THICKNESS` | `1` | 標籤粗細。 |
-| `GLOBAL_MAP_VIS_SHOW_ID` | `1` | 是否顯示 global id。 |
-| `GLOBAL_MAP_VIS_SHOW_CLASS` | `0` | 是否顯示 class 名稱。 |
-| `GLOBAL_MAP_VIS_CAMERAS` | `-` | 逗號分隔的 camera id 清單，例如 `cam01,cam02`。 |
-| `GLOBAL_MAP_VIS_SHOW_LEGEND` | `1` | 是否顯示圖例。 |
-| `GLOBAL_MAP_VIS_GLOBAL_COLOR` | `-` | 全域物件色碼，格式 `#RRGGBB`。 |
-| `GLOBAL_MAP_VIS_CLASS_COLORS` | `-` | 類別色碼對應，格式 `class:#RRGGBB,class2:#RRGGBB`。 |
-| `GLOBAL_MAP_VIS_GLOBAL_RADIUS_RATIO` | `0.008` | 全域物件半徑比例。 |
-| `GLOBAL_MAP_VIS_LOCAL_RADIUS_RATIO` | `0.004` | 區域物件半徑比例。 |
+| `GLOBAL_MAP_VIS_CONFIG_PATH` | `-` | 視覺化 YAML 路徑，相對路徑以 integration root 為基準；啟用視覺化時必填。 |
+
+視覺化 YAML 範例：
+
+```yaml
+map:
+  image_path: data/assets/global_map.png
+  width_meters: 120.0
+  height_meters: 60.0
+
+render:
+  mode: write
+  output_dir: output/global_map
+  window_name: global-map
+  marker_radius: 6
+  label_font_scale: 0.5
+  label_thickness: 1
+  show_global_id: true
+  show_class_name: false
+  show_legend: true
+  global_radius_ratio: 0.008
+  local_radius_ratio: 0.004
+
+cameras:
+  - camera_id: cam01
+    display_name: Camera 1
+    aliases: [cam01, edge_cam01]
+```
+
+- `map.image_path`：底圖路徑，renderer 會依此載入全域地圖。
+- `map.width_meters / map.height_meters`：地圖對應的實際尺寸。
+- `render.*`：由 `GlobalMapRenderer` 自己消費的顯示參數，顏色由 renderer 內建規則自動分配，不需要手動提供色碼。
+- `cameras`：至少提供 `camera_id`；`display_name` 與 `aliases` 為選填，用於圖例與別名匹配。
 
 ## 通訊用途參數
 
