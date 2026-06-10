@@ -105,6 +105,9 @@ cameras:
 | `PHASE_PUBLISH_BACKEND` | 跟隨 `EDGE_EVENT_BACKEND` | phase 廣播協議：`mqtt` 或 `http`；未設定時會沿用 `EDGE_EVENT_BACKEND`。 |
 | `PHASE_TOPIC` | `integration/phase` | phase 廣播通道名稱。 |
 | `PHASE_HEARTBEAT_SECONDS` | `600` | phase 心跳重送間隔，單位秒。 |
+| `MATCHING_BROADCAST_ENABLED` | `0` | 是否啟用 matching 結果廣播；關閉後仍會執行 MC-MOT 與後續流程，但不會對外廣播 matching snapshot。 |
+| `MATCHING_BROADCAST_BACKEND` | 跟隨 `PHASE_PUBLISH_BACKEND` | matching 結果廣播協議：`mqtt` 或 `http`；未設定時會沿用 `PHASE_PUBLISH_BACKEND`。 |
+| `MATCHING_BROADCAST_TOPIC` | `integration/matching` | matching 結果廣播通道名稱；`MATCHING_BROADCAST_CHANNEL` 為相容別名。 |
 
 ## MQTT 協議參數
 
@@ -143,6 +146,20 @@ MQTT_USERNAME=allen
 MQTT_PASSWORD=allen
 PHASE_HEARTBEAT_SECONDS=600
 PHASE_PUBLISH_BACKEND=mqtt
+```
+
+### matching 結果廣播（HTTP / MQTT）
+
+```bash
+# HTTP 模式
+MATCHING_BROADCAST_ENABLED=1
+MATCHING_BROADCAST_BACKEND=http
+MATCHING_BROADCAST_TOPIC=integration/matching
+
+# MQTT 模式
+MATCHING_BROADCAST_ENABLED=1
+MATCHING_BROADCAST_BACKEND=mqtt
+MATCHING_BROADCAST_TOPIC=integration/matching
 ```
 
 ### edge events 接收（HTTP / MQTT）
