@@ -3,13 +3,16 @@ from __future__ import annotations
 
 from smart_messaging_core import HttpConfig, MessagingClient, MessagingConfig, MqttConfig, RouteConfig
 
+from integration.pipeline.tasks.nodes.matching_broadcast.constants import MATCHING_BROADCAST_ROUTE
+
 
 def build_messaging_client(config) -> MessagingClient:
-    """Build a single messaging facade for edge ingestion + phase publish."""
+    """Build a single messaging facade for edge ingestion, matching broadcast and phase publish."""
 
     mqtt_cfg = getattr(config, "mqtt", None)
     edge_cfg = getattr(config, "edge_events", None)
     phase_cfg = getattr(config, "phase_messaging", None)
+    matching_cfg = getattr(config, "matching_broadcast", None)
     phase_http = getattr(config, "phase_http", None)
 
     publish_backend = (getattr(phase_cfg, "backend", None) or "mqtt").strip().lower()
@@ -47,6 +50,12 @@ def build_messaging_client(config) -> MessagingClient:
             channel=getattr(edge_cfg, "channel", "edge/events"),
         ),
     }
+
+    if matching_cfg is not None and getattr(matching_cfg, "enabled", False):
+        routes[MATCHING_BROADCAST_ROUTE] = RouteConfig(
+            backend=(getattr(matching_cfg, "backend", None) or "mqtt").strip().lower(),
+            channel=getattr(matching_cfg, "channel", "integration/matching"),
+        )
 
     return MessagingClient(
         MessagingConfig(

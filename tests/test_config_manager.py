@@ -102,3 +102,15 @@ def test_load_config_requires_visualization_path_when_enabled(monkeypatch) -> No
 
     with pytest.raises(RuntimeError, match="GLOBAL_MAP_VIS_CONFIG_PATH"):
         load_config()
+
+
+def test_load_config_includes_matching_broadcast_settings(monkeypatch) -> None:
+    monkeypatch.setenv("MATCHING_BROADCAST_ENABLED", "1")
+    monkeypatch.setenv("MATCHING_BROADCAST_BACKEND", "mqtt")
+    monkeypatch.setenv("MATCHING_BROADCAST_TOPIC", "integration/matching")
+
+    config = load_config()
+
+    assert config.matching_broadcast.enabled is True
+    assert config.matching_broadcast.backend == "mqtt"
+    assert config.matching_broadcast.channel == "integration/matching"

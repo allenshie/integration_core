@@ -93,6 +93,21 @@ def _phase_topic() -> str:
     ).strip()
 
 
+def _matching_broadcast_backend() -> str:
+    override = (os.getenv("MATCHING_BROADCAST_BACKEND") or "").strip().lower()
+    if override:
+        return override
+    return _phase_publish_backend()
+
+
+def _matching_broadcast_topic() -> str:
+    return (
+        os.getenv("MATCHING_BROADCAST_TOPIC")
+        or os.getenv("MATCHING_BROADCAST_CHANNEL")
+        or "integration/matching"
+    ).strip()
+
+
 @dataclass
 class FormatTaskConfig:
     enabled: bool = _env_bool("FORMAT_TASK_ENABLED", True)
@@ -143,6 +158,13 @@ class PhaseMessagingConfig:
     backend: str = _phase_publish_backend()
     channel: str = _phase_topic()
     heartbeat_seconds: int = int(os.getenv("PHASE_HEARTBEAT_SECONDS", "600"))
+
+
+@dataclass
+class MatchingBroadcastConfig:
+    enabled: bool = field(default_factory=lambda: _env_bool("MATCHING_BROADCAST_ENABLED", False))
+    backend: str = field(default_factory=_matching_broadcast_backend)
+    channel: str = field(default_factory=_matching_broadcast_topic)
 
 
 @dataclass
@@ -219,6 +241,7 @@ class AppConfig:
     mqtt: MqttConfig = field(default_factory=MqttConfig)
     edge_events: EdgeEventMessagingConfig = field(default_factory=EdgeEventMessagingConfig)
     phase_messaging: PhaseMessagingConfig = field(default_factory=PhaseMessagingConfig)
+    matching_broadcast: MatchingBroadcastConfig = field(default_factory=MatchingBroadcastConfig)
     phase_http: PhaseHttpConfig = field(default_factory=PhaseHttpConfig)
     mcmot_config_path: str = _env_path("MCMOT_CONFIG_PATH") or "../MCMOT/configs/road_config.yaml"
     ingestion_task: IngestionTaskConfig = field(default_factory=IngestionTaskConfig)

@@ -12,6 +12,7 @@ from integration.pipeline.tasks.summary import (
     FORMAT_STATS_RESOURCE,
     INGESTION_STATS_RESOURCE,
     MC_MOT_STATS_RESOURCE,
+    MATCHING_BROADCAST_STATS_RESOURCE,
     RULE_STATS_RESOURCE,
     render_pipeline_summary,
     reset_pipeline_summary,
@@ -49,12 +50,21 @@ class DummyTask(QuietTaskBase):
 
 
 class DummyNode:
-    def __init__(self, resource_key: str, values: dict[str, int]) -> None:
+    def __init__(
+        self,
+        resource_key: str,
+        values: dict[str, int],
+        payload: dict[str, object] | None = None,
+    ) -> None:
         self._resource_key = resource_key
         self._values = values
+        self._payload = payload
 
-    def execute(self, context: DummyContext) -> None:
+    def execute(self, context: DummyContext) -> TaskResult | None:
         store_stage_stats(context, self._resource_key, self._values)
+        if self._payload is None:
+            return None
+        return TaskResult(status="ingestion_done", payload=self._payload)
 
 
 def build_context() -> DummyContext:
@@ -80,6 +90,11 @@ def test_render_pipeline_summary_outputs_table() -> None:
     )
     store_stage_stats(
         context,
+        MATCHING_BROADCAST_STATS_RESOURCE,
+        {"dispatched": 1, "skipped": 0, "failed": 0},
+    )
+    store_stage_stats(
+        context,
         FORMAT_STATS_RESOURCE,
         {"events": 3, "tracked": 7, "global": 4, "signal_groups": 2},
     )
@@ -101,6 +116,7 @@ def test_render_pipeline_summary_outputs_table() -> None:
     assert any(line.startswith("stage") and "| raw" in line for line in summary_lines)
     assert any(line.startswith("ingestion") for line in summary_lines)
     assert any(line.startswith("mc_mot") for line in summary_lines)
+    assert any(line.startswith("matching_broadcast") for line in summary_lines)
     assert any(line.startswith("format_conversion") for line in summary_lines)
     assert any(line.startswith("rule_evaluation") for line in summary_lines)
     assert any(line.startswith("event_dispatch") for line in summary_lines)
@@ -125,15 +141,29 @@ def test_pipeline_summary_logs_once_per_interval(caplog, monkeypatch) -> None:
     pipeline = MCMOTPipelineTask(
         context,
         nodes=[
-            DummyNode(INGESTION_STATS_RESOURCE, {"raw": 12, "events": 4, "dropped": 0}),
+            DummyNode(
+                INGESTION_STATS_RESOURCE,
+                {"raw": 12, "events": 4, "dropped": 0, "duplicates": 1},
+                payload={
+                    "raw": 12,
+                    "events": 4,
+                    "dropped": 0,
+                    "duplicates": 1,
+                    "has_new_data": True,
+                },
+            ),
             DummyNode(MC_MOT_STATS_RESOURCE, {"events": 4, "tracked": 8, "global": 2}),
+            DummyNode(
+                MATCHING_BROADCAST_STATS_RESOURCE,
+                {"dispatched": 1, "skipped": 0, "failed": 0},
+            ),
             DummyNode(FORMAT_STATS_RESOURCE, {"events": 4, "tracked": 8, "global": 2, "signal_groups": 1}),
             DummyNode(RULE_STATS_RESOURCE, {"warnings": 3}),
             DummyNode(EVENT_DISPATCH_STATS_RESOURCE, {"dispatched": 3, "skipped": 0, "failed": 0}),
         ],
     )
 
-    monotonic_values = iter([100.0, 110.0])
+    monotonic_values = iter([100.0, 100.05, 110.0, 120.0, 120.05, 130.0])
     monkeypatch.setattr(
         "integration.pipeline.tasks.pipelines.mcmot_pipeline.time.monotonic",
         lambda: next(monotonic_values),
@@ -147,6 +177,11 @@ def test_pipeline_summary_logs_once_per_interval(caplog, monkeypatch) -> None:
     assert second_result.status == "mcmot_pipeline_done"
     assert "開始任務：mcmot_pipeline" not in caplog.text
     assert caplog.text.count("pipeline_summary window=60s phase=working status=ok") == 1
+    assert (
+        "throughput | elapsed=10s | source_fps=1.20 | processed_fps=0.40 | "
+        "duplicate_skip_fps=0.10 | active_batches=1 | idle_batches=0"
+    ) in caplog.text
+    assert "latency | elapsed=10s | avg_active_ms=50.00" in caplog.text
     summary_record = next(
         record.message
         for record in caplog.records
@@ -165,6 +200,10 @@ def test_pipeline_summary_interval_follows_config(caplog) -> None:
         nodes=[
             DummyNode(INGESTION_STATS_RESOURCE, {"raw": 12, "events": 4, "dropped": 0}),
             DummyNode(MC_MOT_STATS_RESOURCE, {"events": 4, "tracked": 8, "global": 2}),
+            DummyNode(
+                MATCHING_BROADCAST_STATS_RESOURCE,
+                {"dispatched": 1, "skipped": 0, "failed": 0},
+            ),
             DummyNode(FORMAT_STATS_RESOURCE, {"events": 4, "tracked": 8, "global": 2, "signal_groups": 1}),
             DummyNode(RULE_STATS_RESOURCE, {"warnings": 3}),
             DummyNode(EVENT_DISPATCH_STATS_RESOURCE, {"dispatched": 3, "skipped": 0, "failed": 0}),
