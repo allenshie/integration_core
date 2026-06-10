@@ -22,7 +22,10 @@ class IngestionTask(QuietTaskBase):
         raw_events = store.pop_all()
         result = self._engine.process(context, raw_events)
         context.set_resource("edge_events", result.events)
-        context.set_resource("edge_events_latest", result.events)
+        context.set_resource("pipeline_has_new_data", result.has_new_data)
+        context.set_resource("pipeline_dirty_camera_ids", list(result.dirty_camera_ids))
+        if result.has_new_data:
+            context.set_resource("edge_events_latest", result.events)
         store_stage_stats(
             context,
             INGESTION_STATS_RESOURCE,
@@ -30,13 +33,16 @@ class IngestionTask(QuietTaskBase):
                 "raw": result.raw_count,
                 "events": len(result.events),
                 "dropped": result.dropped,
+                "duplicates": result.duplicate_count,
             },
         )
         context.logger.debug(
-            "匯入 %d 台相機的最新事件（原始 %d 筆，丟棄 %d 筆）",
+            "匯入 %d 台相機的最新事件（原始 %d 筆，丟棄 %d 筆，重複 %d 筆，new=%s）",
             len(result.events),
             result.raw_count,
             result.dropped,
+            result.duplicate_count,
+            result.has_new_data,
         )
         return TaskResult(
             status="ingestion_done",
@@ -44,6 +50,9 @@ class IngestionTask(QuietTaskBase):
                 "events": len(result.events),
                 "raw": result.raw_count,
                 "dropped": result.dropped,
+                "duplicates": result.duplicate_count,
+                "has_new_data": result.has_new_data,
+                "dirty_camera_ids": list(result.dirty_camera_ids),
             },
         )
 

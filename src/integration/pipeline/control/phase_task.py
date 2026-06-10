@@ -237,6 +237,8 @@ class PhaseTask(BaseTask):
     def _ephemeral_context_keys() -> tuple[str, ...]:
         return (
             "edge_events",
+            "pipeline_has_new_data",
+            "pipeline_dirty_camera_ids",
             "mc_mot_tracked",
             "mc_mot_global_objects",
             "global_map_snapshot",

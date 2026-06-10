@@ -8,6 +8,7 @@
 - [環境變數說明（含協議範例）](docs/ENV.md)
 - [Edge 通訊 Adapter 開發](docs/EDGE_COMM_ADAPTER.md)
 - [Pipeline 排程設定](docs/CORE_WORKFLOW.md)
+- [pipeline_summary 輸出說明](docs/PIPELINE_SUMMARY.md)
 - [部署指南（Docker/K8s）](docs/DEPLOYMENT.md)
 - [MC-MOT 外部專案說明](https://github.com/ChenPingChen/MCMOT)
 
