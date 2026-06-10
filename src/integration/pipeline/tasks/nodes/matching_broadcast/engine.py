@@ -50,6 +50,7 @@ class DefaultMatchingBroadcastEngine(BaseMatchingBroadcastEngine):
         broadcast_cfg = getattr(context.config, "matching_broadcast", None)
         enabled = bool(getattr(broadcast_cfg, "enabled", False)) if broadcast_cfg is not None else False
 
+        # 未啟用時直接回傳 skip，保留原有 pipeline 行為。
         if not enabled:
             context.logger.debug("matching broadcast disabled, skip %d tracked objects", len(tracked_list))
             return MatchingBroadcastResult(
@@ -58,6 +59,7 @@ class DefaultMatchingBroadcastEngine(BaseMatchingBroadcastEngine):
                 task_payload={"reason": "disabled", "tracked": len(tracked_list)},
             )
 
+        # 沒有可廣播的追蹤物件時，不送出空 payload。
         if not tracked_list:
             context.logger.debug("matching broadcast skipped: no tracked objects")
             return MatchingBroadcastResult(
@@ -66,7 +68,9 @@ class DefaultMatchingBroadcastEngine(BaseMatchingBroadcastEngine):
                 task_payload={"reason": "no_tracked_objects"},
             )
 
+        # 將 local/global 對照整理成單一廣播 payload。
         payload = MatchingBroadcastPayload.from_tracked_objects(tracked_list).to_dict()
+        # 若過濾後沒有任何 camera 可用資料，視為本輪無有效結果。
         if not payload.get("camera_matches"):
             context.logger.debug("matching broadcast skipped: no valid camera matches")
             return MatchingBroadcastResult(
@@ -75,6 +79,7 @@ class DefaultMatchingBroadcastEngine(BaseMatchingBroadcastEngine):
                 task_payload={"reason": "no_valid_tracks"},
             )
 
+        # 取得 messaging client，由上層統一負責 route 與 backend。
         messaging = context.get_resource("messaging_client")
         if messaging is None:
             context.logger.warning("matching broadcast skipped: messaging_client not ready")
@@ -85,6 +90,7 @@ class DefaultMatchingBroadcastEngine(BaseMatchingBroadcastEngine):
                 message_payload=payload,
             )
 
+        # publish 失敗時回傳 failed，讓 task 可以統計與記錄。
         try:
             published = messaging.publish(MATCHING_BROADCAST_ROUTE, payload)
         except Exception as exc:  # pylint: disable=broad-except
@@ -96,6 +102,7 @@ class DefaultMatchingBroadcastEngine(BaseMatchingBroadcastEngine):
                 message_payload=payload,
             )
 
+        # backend 明確拒絕送出時，也視為失敗。
         if not published:
             context.logger.warning("matching broadcast failed: backend rejected publish")
             return MatchingBroadcastResult(
@@ -105,6 +112,7 @@ class DefaultMatchingBroadcastEngine(BaseMatchingBroadcastEngine):
                 message_payload=payload,
             )
 
+        # 成功送出後，只回報本輪統計。
         context.logger.debug(
             "matching broadcast completed: cameras=%d tracked=%d",
             len(payload.get("camera_matches") or {}),

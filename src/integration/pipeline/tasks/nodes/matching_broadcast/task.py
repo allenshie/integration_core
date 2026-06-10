@@ -27,8 +27,11 @@ class MatchingBroadcastTask(QuietTaskBase):
         return self._build_task_result(result)
 
     def _init_engine(self, context: TaskContext | None) -> BaseMatchingBroadcastEngine:
-        _ = context
-        return DefaultMatchingBroadcastEngine(context=context)
+        return self._init_plugin(
+            plugin_name="Matching Broadcast Engine",
+            plugin_cls=DefaultMatchingBroadcastEngine,
+            init_kwargs={"context": context},
+        )
 
     @staticmethod
     def _store_stage_stats(context: TaskContext, result: MatchingBroadcastResult) -> None:
