@@ -1,14 +1,20 @@
 from __future__ import annotations
 
-from pathlib import Path
+import json
+from importlib.metadata import distribution
 
-import mcmot
 from mcmot import MCMOT
 
 
-def test_app_uv_loads_local_mcmot_batch_api():
-    module_path = Path(mcmot.__file__).resolve()
-    expected_root = Path(__file__).parents[3] / "MCMOT" / "mcmot"
+EXPECTED_MCMOT_COMMIT = "edf55ccb236481c4189f141ae208dcfc7fea9dfa"
 
-    assert module_path.is_relative_to(expected_root)
+
+def test_uv_loads_pinned_mcmot_batch_api():
+    direct_url = json.loads(distribution("MCMOT").read_text("direct_url.json") or "{}")
+    vcs_info = direct_url["vcs_info"]
+
+    assert direct_url["url"] == "ssh://git@github.com/ChenPingChen/MCMOT.git"
+    assert vcs_info["vcs"] == "git"
+    assert vcs_info["requested_revision"] == EXPECTED_MCMOT_COMMIT
+    assert vcs_info["commit_id"] == EXPECTED_MCMOT_COMMIT
     assert hasattr(MCMOT, "process_trajectory_snapshot")

@@ -1,10 +1,8 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from pathlib import Path
 from types import SimpleNamespace
 
-import mcmot
 import pytest
 
 from integration.api.trajectory_store import DetectionEvent, TimestampContractError, TrajectoryStore
@@ -123,11 +121,7 @@ def test_app_adapter_preserves_attempt_report_as_opaque_result():
     assert engine.last_attempt_report is attempt_report
 
 
-def test_local_editable_mcmot_runtime_accepts_snapshot_without_global_id():
-    mcmot_path = Path(mcmot.__file__).resolve()
-    expected_root = Path(__file__).resolve().parents[3] / "MCMOT"
-    assert mcmot_path.is_relative_to(expected_root.resolve())
-
+def test_pinned_mcmot_runtime_accepts_snapshot_without_global_id():
     factory = GalleryRuntimeFactory(settings=SimpleNamespace())
     objects = factory.to_object_data(
         "cam-a",
