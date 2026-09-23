@@ -39,6 +39,42 @@ class DummyContext:
         self.reported_failure.append((name, detail))
 
 
+class _TypedStore:
+    def __init__(self) -> None:
+        timestamp = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
+        self.snapshot = SimpleNamespace(
+            objects=(
+                SimpleNamespace(
+                    camera_id="cam01",
+                    local_id="7",
+                    class_name="person",
+                    latest_bbox=(10.0, 20.0, 30.0, 40.0),
+                    latest_score=0.95,
+                    latest_feature=None,
+                    first_seen_at=timestamp,
+                    last_observed_at=timestamp,
+                    last_updated_at=timestamp,
+                    lifecycle_state="active",
+                    latest_timestamp=timestamp,
+                    local_trajectory=((timestamp, 20.0, 40.0),),
+                    revision=1,
+                    watermark=1,
+                    latest_metadata={},
+                ),
+            ),
+            high_watermark=1,
+        )
+        self.snapshot_watermarks: list[int] = []
+        self.ack_watermarks: list[int] = []
+
+    def snapshot_since(self, watermark: int):
+        self.snapshot_watermarks.append(watermark)
+        return self.snapshot
+
+    def ack(self, watermark: int) -> None:
+        self.ack_watermarks.append(watermark)
+
+
 def _build_fake_mcmot_module(state: dict[str, object]) -> ModuleType:
     module = ModuleType("mcmot")
 
@@ -78,6 +114,39 @@ def _build_fake_mcmot_module(state: dict[str, object]) -> ModuleType:
                     "global_trajectory": [(timestamp, 12.0, 34.0)],
                 }
             ]
+
+        def process_trajectory_snapshot(self, *, objects, high_watermark):  # noqa: ANN001
+            state["typed_snapshot_call"] = {
+                "objects": list(objects),
+                "high_watermark": high_watermark,
+            }
+            first = objects[0]
+            timestamp = first["timestamp"]
+            self._last_timestamp = timestamp
+            return {
+                "tracked_objects": [
+                    {
+                        "camera_id": first["camera_id"],
+                        "class_name": first["class_name"],
+                        "local_id": first["local_id"],
+                        "global_id": "g-typed",
+                        "bbox": first["bbox"],
+                        "score": first["score"],
+                        "timestamp": timestamp,
+                        "global_position": {"x": 20.0, "y": 40.0},
+                    }
+                ],
+                "global_objects": [
+                    {
+                        "global_id": "g-typed",
+                        "class_name": first["class_name"],
+                        "camera_id": first["camera_id"],
+                    }
+                ],
+                "success": True,
+                "matching_performed": True,
+                "committed_watermark": high_watermark,
+            }
 
         def finalize_global_updates(self, timestamp):  # noqa: ANN001
             self._last_timestamp = timestamp
@@ -222,6 +291,7 @@ def test_mcmot_task_initializes_engine_from_external_module(monkeypatch) -> None
             global_map_visualization_enabled=False,
         ),
         resources={
+            "trajectory_store": _TypedStore(),
             "edge_events": [
                 {
                     "camera_id": "cam01",
@@ -235,7 +305,7 @@ def test_mcmot_task_initializes_engine_from_external_module(monkeypatch) -> None
                         }
                     ],
                 }
-            ]
+            ],
         },
     )
 
@@ -248,6 +318,10 @@ def test_mcmot_task_initializes_engine_from_external_module(monkeypatch) -> None
         "snapshot_objects": 1,
         "tracked": 1,
         "global_objects": 1,
+        "success": True,
+        "matching_performed": True,
+        "committed_watermark": 1,
+        "reason": "matched_and_committed",
     }
     assert context.get_resource("mcmot_engine") is not None
     assert context.get_resource("global_map_renderer") is None
@@ -255,6 +329,7 @@ def test_mcmot_task_initializes_engine_from_external_module(monkeypatch) -> None
     assert len(context.get_resource("mc_mot_global_objects")) == 1
     assert fake_state["tracking_config_path"] == "/tmp/mcmot-tracking-config.yaml"
     assert fake_state["camera_config_path"] == "/tmp/mcmot-camera-config.yaml"
+    assert fake_state["typed_snapshot_call"]["high_watermark"] == 1
 
 
 def test_mcmot_task_keeps_attempt_report_opaque_and_does_not_render_detail(
@@ -305,6 +380,22 @@ def test_mcmot_task_keeps_attempt_report_opaque_and_does_not_render_detail(
 
     assert result.status == "mc_mot_done"
     assert "matching_attempt" not in caplog.text
+
+
+def test_mcmot_enabled_requires_trajectory_store(monkeypatch) -> None:
+    monkeypatch.setitem(sys.modules, "mcmot", _build_fake_mcmot_module({}))
+    context = DummyContext(
+        config=SimpleNamespace(
+            mcmot_enabled=True,
+            mcmot_tracking_config_path="/tmp/mcmot-tracking-config.yaml",
+            mcmot_camera_config_path="/tmp/mcmot-camera-config.yaml",
+            global_map_visualization_enabled=False,
+        ),
+        resources={"edge_events": []},
+    )
+
+    with pytest.raises(KeyError, match=r"trajectory_store"):
+        MCMOTTask().execute(context)
 
 
 def test_mcmot_task_init_engine_uses_default_engine_class(monkeypatch) -> None:
@@ -361,6 +452,7 @@ def test_mcmot_task_builds_global_map_renderer_from_visual_config(monkeypatch) -
             global_map_visualization=vis_cfg,
         ),
         resources={
+            "trajectory_store": _TypedStore(),
             "edge_events": [
                 {
                     "camera_id": "cam01",
@@ -374,7 +466,7 @@ def test_mcmot_task_builds_global_map_renderer_from_visual_config(monkeypatch) -
                         }
                     ],
                 }
-            ]
+            ],
         },
     )
 

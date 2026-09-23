@@ -10,6 +10,7 @@ from loguru import logger as loguru_logger
 
 from integration.api.trajectory_store import (
     TimestampContractError,
+    TrajectoryContractError,
     normalize_utc_timestamp,
 )
 from integration.utils.paths import get_config_root
@@ -208,23 +209,39 @@ class MCMOTEngine:
         # the App/MCMOT boundary as a formal Gallery ID.
         metadata.pop("global_id", None)
 
+        class_name = getattr(obj, "class_name", None)
+        if not isinstance(class_name, str) or not class_name.strip():
+            raise TrajectoryContractError(
+                "class_name must be a non-empty string",
+                path="snapshot.class_name",
+            )
+
         local_trajectory = []
+        previous_timestamp: datetime | None = None
         for index, point in enumerate(getattr(obj, "local_trajectory", ())):
             if not isinstance(point, Sequence) or len(point) != 3:
                 raise TimestampContractError(
                     "trajectory point must be [timestamp, x, y]",
                     path=f"snapshot.local_trajectory[{index}]",
                 )
+            timestamp = normalize_utc_timestamp(
+                point[0],
+                path=f"snapshot.local_trajectory[{index}][0]",
+            )
+            assert timestamp is not None
+            if previous_timestamp is not None and timestamp <= previous_timestamp:
+                raise TrajectoryContractError(
+                    "trajectory timestamps must be strictly increasing",
+                    path=f"snapshot.local_trajectory[{index}][0]",
+                )
             local_trajectory.append(
                 [
-                    normalize_utc_timestamp(
-                        point[0],
-                        path=f"snapshot.local_trajectory[{index}][0]",
-                    ),
+                    timestamp,
                     point[1],
                     point[2],
                 ]
             )
+            previous_timestamp = timestamp
         if not local_trajectory:
             raise TimestampContractError(
                 "trajectory must be non-empty",
@@ -241,7 +258,7 @@ class MCMOTEngine:
         return {
             "camera_id": getattr(obj, "camera_id", metadata.get("camera_id")),
             "local_id": getattr(obj, "local_id", metadata.get("local_id")),
-            "class_name": getattr(obj, "class_name", None) or metadata.get("class_name"),
+            "class_name": class_name,
             "bbox": list(getattr(obj, "latest_bbox", metadata.get("bbox", [])) or []),
             "score": getattr(obj, "latest_score", None),
             "feature": getattr(obj, "latest_feature", None),

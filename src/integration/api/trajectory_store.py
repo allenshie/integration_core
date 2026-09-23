@@ -2,7 +2,7 @@
 
 The store uses a monotonically increasing watermark for each detection.  A
 trajectory is identified by ``(camera_id, local_id)`` and its revision is
-incremented for every detection belonging to that key.
+incremented for every accepted, non-duplicate detection belonging to that key.
 """
 
 from __future__ import annotations
@@ -28,15 +28,21 @@ LifecycleState: TypeAlias = Literal["active", "idle", "grace", "expired", "remov
 LOGGER = logger.bind(component=__name__)
 
 
-class TimestampContractError(ValueError):
-    """Raised when an App timestamp cannot satisfy the snapshot contract."""
+class TrajectoryContractError(ValueError):
+    """Raised when an event cannot satisfy the local trajectory contract."""
 
-    error_type = "timestamp_contract_error"
+    error_type = "trajectory_contract_error"
 
     def __init__(self, reason: str, *, path: str) -> None:
         self.reason = reason
         self.path = path
         super().__init__(f"{self.error_type}: {reason} at {path}")
+
+
+class TimestampContractError(TrajectoryContractError):
+    """Raised when an App timestamp cannot satisfy the snapshot contract."""
+
+    error_type = "timestamp_contract_error"
 
 
 def normalize_utc_timestamp(
@@ -107,7 +113,7 @@ class TrajectoryObject:
 
     camera_id: str
     local_id: str
-    class_name: str | None
+    class_name: str
     first_seen_at: Any
     last_observed_at: Any
     last_updated_at: Any
@@ -167,7 +173,7 @@ class _TrajectoryState:
     camera_id: str
     local_id: str
     revision: int
-    class_name: str | None
+    class_name: str
     first_seen_at: Any
     last_observed_at: Any
     last_updated_at: Any
@@ -252,7 +258,9 @@ class TrajectoryStore:
         """Append detections and return the resulting high watermark.
 
         Events are normalized before mutating the store, so malformed input
-        cannot leave a partially appended batch behind.
+        or an invalid per-object timestamp sequence cannot leave a partially
+        appended batch behind.  Idempotent duplicates are removed during the
+        preflight and therefore do not consume a revision or watermark.
         """
 
         normalized = [self._normalize_event(event) for event in events]
@@ -261,55 +269,120 @@ class TrajectoryStore:
                 return self._watermark
 
         with self._lock:
-            for event in normalized:
-                self._watermark += 1
-                key = (event.camera_id, event.local_id)
-                state = self._objects.get(key)
-                if state is None:
-                    point = self.point_from_bbox(event.bbox)
-                    state = _TrajectoryState(
-                        camera_id=event.camera_id,
-                        local_id=event.local_id,
-                        revision=0,
-                        class_name=event.class_name,
-                        first_seen_at=event.timestamp,
-                        last_observed_at=event.timestamp,
-                        last_updated_at=event.updated_at or self._now(),
-                        lifecycle_state="active",
-                        latest_timestamp=event.timestamp,
-                        local_trajectory=deque(maxlen=self._max_points),
-                        latest_metadata={},
-                        latest_bbox=event.bbox,
-                        latest_point=point,
-                        ema_point=point,
-                        latest_score=event.score,
-                        latest_feature=deepcopy(event.feature),
-                        last_watermark=0,
-                    )
-                    self._objects[key] = state
-
-                point = self.point_from_bbox(event.bbox)
-                state.revision += 1
-                state.local_trajectory.append((event.timestamp, point[0], point[1]))
-                self._prune_trajectory(state, event.timestamp)
-                state.class_name = event.class_name or state.class_name
-                if state.first_seen_at is None:
-                    state.first_seen_at = event.timestamp
-                state.last_observed_at = event.timestamp
-                state.last_updated_at = event.updated_at or self._now()
-                state.lifecycle_state = "active"
-                state.latest_timestamp = event.timestamp
-                state.latest_metadata = deepcopy(event.metadata)
-                state.latest_bbox = event.bbox
-                state.latest_point = point
-                # Keep the legacy field aligned to the latest raw point.  No
-                # EMA is applied, so raw trajectory remains lossless.
-                state.ema_point = point
-                state.latest_score = event.score
-                state.latest_feature = deepcopy(event.feature)
-                state.last_watermark = self._watermark
+            accepted = self._preflight_append(normalized)
+            for event in accepted:
+                self._append_normalized_event(event)
 
             return self._watermark
+
+    def _preflight_append(self, events: Sequence[DetectionEvent]) -> list[DetectionEvent]:
+        """Validate ordering/conflicts before changing any store state."""
+
+        latest_by_key: dict[ObjectKey, tuple[datetime, BBox, Point]] = {}
+        accepted: list[DetectionEvent] = []
+        for index, event in enumerate(events):
+            assert event.timestamp is not None
+            key = (event.camera_id, event.local_id)
+            point = self.point_from_bbox(event.bbox)
+            latest = latest_by_key.get(key)
+            if latest is None:
+                state = self._objects.get(key)
+                if state is not None:
+                    latest = (
+                        state.latest_timestamp,
+                        state.latest_bbox,
+                        state.latest_point,
+                    )
+
+            if latest is None:
+                latest_by_key[key] = (event.timestamp, event.bbox, point)
+                accepted.append(event)
+                continue
+
+            latest_timestamp, latest_bbox, latest_point = latest
+            if event.timestamp < latest_timestamp:
+                reason = "timestamp is older than the latest timestamp for this local object"
+                LOGGER.warning(
+                    "reject trajectory event "
+                    f"camera_id={event.camera_id} local_id={event.local_id} "
+                    f"reason={reason} path=events[{index}].timestamp"
+                )
+                raise TrajectoryContractError(
+                    reason,
+                    path=f"events[{index}].timestamp",
+                )
+            if event.timestamp == latest_timestamp:
+                if event.bbox == latest_bbox and point == latest_point:
+                    # Exact replay of the latest point.  It is intentionally
+                    # not added to ``accepted`` and consumes no revision or
+                    # watermark.
+                    continue
+                reason = "conflicting duplicate timestamp has a different bbox or bottom-center point"
+                LOGGER.warning(
+                    "reject trajectory event "
+                    f"camera_id={event.camera_id} local_id={event.local_id} "
+                    f"reason={reason} path=events[{index}].timestamp"
+                )
+                raise TrajectoryContractError(
+                    reason,
+                    path=f"events[{index}].timestamp",
+                )
+
+            latest_by_key[key] = (event.timestamp, event.bbox, point)
+            accepted.append(event)
+
+        return accepted
+
+    def _append_normalized_event(self, event: DetectionEvent) -> None:
+        """Append one already-normalized, preflighted event."""
+
+        assert event.timestamp is not None
+        self._watermark += 1
+        key = (event.camera_id, event.local_id)
+        state = self._objects.get(key)
+        if state is None:
+            point = self.point_from_bbox(event.bbox)
+            state = _TrajectoryState(
+                camera_id=event.camera_id,
+                local_id=event.local_id,
+                revision=0,
+                class_name=event.class_name,
+                first_seen_at=event.timestamp,
+                last_observed_at=event.timestamp,
+                last_updated_at=event.updated_at or self._now(),
+                lifecycle_state="active",
+                latest_timestamp=event.timestamp,
+                local_trajectory=deque(maxlen=self._max_points),
+                latest_metadata={},
+                latest_bbox=event.bbox,
+                latest_point=point,
+                ema_point=point,
+                latest_score=event.score,
+                latest_feature=deepcopy(event.feature),
+                last_watermark=0,
+            )
+            self._objects[key] = state
+
+        point = self.point_from_bbox(event.bbox)
+        state.revision += 1
+        state.local_trajectory.append((event.timestamp, point[0], point[1]))
+        self._prune_trajectory(state, event.timestamp)
+        state.class_name = event.class_name
+        if state.first_seen_at is None:
+            state.first_seen_at = event.timestamp
+        state.last_observed_at = event.timestamp
+        state.last_updated_at = event.updated_at or self._now()
+        state.lifecycle_state = "active"
+        state.latest_timestamp = event.timestamp
+        state.latest_metadata = deepcopy(event.metadata)
+        state.latest_bbox = event.bbox
+        state.latest_point = point
+        # Keep the legacy field aligned to the latest raw point.  No EMA is
+        # applied, so raw trajectory remains lossless.
+        state.ema_point = point
+        state.latest_score = event.score
+        state.latest_feature = deepcopy(event.feature)
+        state.last_watermark = self._watermark
 
     def sweep(
         self,
@@ -522,16 +595,14 @@ class TrajectoryStore:
             metadata: dict[str, Any] = dict(event.metadata)
         elif isinstance(event, Mapping):
             data = dict(event)
-            camera_id = data.pop("camera_id", data.pop("camera", None))
-            local_id = data.pop("local_id", data.pop("track_id", data.pop("id", None)))
-            bbox = data.pop("bbox", data.pop("box", None))
-            timestamp = data.pop(
-                "timestamp", data.pop("ts", data.pop("time", None))
-            )
-            class_name = data.pop("class_name", data.pop("label", None))
-            score = data.pop("score", data.pop("confidence", None))
+            camera_id = cls._pop_alias(data, ("camera_id", "camera"))
+            local_id = cls._pop_alias(data, ("local_id", "track_id", "id"))
+            bbox = cls._pop_alias(data, ("bbox", "box"))
+            timestamp = cls._pop_alias(data, ("timestamp", "ts", "time"))
+            class_name = cls._pop_alias(data, ("class_name", "label"))
+            score = cls._pop_alias(data, ("score", "confidence"))
             feature = data.pop("feature", None)
-            updated_at = data.pop("updated_at", data.pop("ingested_at", None))
+            updated_at = cls._pop_alias(data, ("updated_at", "ingested_at"))
             supplied_metadata = data.pop("metadata", data.pop("meta", None))
             metadata = dict(supplied_metadata) if isinstance(supplied_metadata, Mapping) else {}
             metadata.update(data)
@@ -544,6 +615,11 @@ class TrajectoryStore:
             raise ValueError("local_id is required")
         if bbox is None:
             raise ValueError("bbox is required")
+        if not isinstance(class_name, str) or not class_name.strip():
+            raise TrajectoryContractError(
+                "class_name or label must be a non-empty string",
+                path="class_name",
+            )
 
         normalized_bbox = cls._normalize_bbox(bbox)
         timestamp = cls._normalize_timestamp(timestamp, path="timestamp", required=True)
@@ -560,7 +636,7 @@ class TrajectoryStore:
             local_id=str(local_id),
             bbox=normalized_bbox,
             timestamp=timestamp,
-            class_name=str(class_name) if class_name is not None else None,
+            class_name=class_name,
             score=float(score) if score is not None else None,
             feature=deepcopy(feature),
             updated_at=updated_at,
@@ -576,9 +652,14 @@ class TrajectoryStore:
         of being allowed to fail the whole ingestion batch.
         """
 
-        detection_events: list[dict[str, Any]] = []
         skipped_by_camera: dict[str, int] = {}
         for event in events:
+            if not isinstance(event, Mapping):
+                LOGGER.warning(
+                    "skip malformed edge event reason=event must be a mapping "
+                    f"event_type={type(event).__name__}"
+                )
+                continue
             event_data = dict(event)
             detections = event_data.pop("detections", None)
             if not detections:
@@ -619,11 +700,37 @@ class TrajectoryStore:
                     "frame_seq": event.get("frame_seq"),
                     "models": deepcopy(event.get("models") or []),
                 }
-                detection_events.append(merged)
+                try:
+                    self.append_events([merged])
+                except (TypeError, ValueError) as exc:
+                    camera_id = str(event.get("camera_id") or "<unknown>")
+                    skipped_by_camera[camera_id] = skipped_by_camera.get(camera_id, 0) + 1
+                    LOGGER.warning(
+                        "skip malformed edge detection "
+                        f"camera_id={camera_id} session_id={event.get('session_id')} "
+                        f"frame_seq={event.get('frame_seq')} detection_index={detection_index} "
+                        f"reason={exc}"
+                    )
 
         if skipped_by_camera:
             LOGGER.warning(f"skipped untrackable edge detections by camera={skipped_by_camera}")
-        return self.append_events(detection_events)
+        with self._lock:
+            return self._watermark
+
+    @staticmethod
+    def _pop_alias(data: dict[str, Any], names: Sequence[str]) -> Any:
+        """Pop one canonical/legacy alias while preserving non-null fallbacks."""
+
+        selected = None
+        for name in names:
+            if name not in data:
+                continue
+            value = data.pop(name)
+            if selected is None:
+                selected = value
+            if value is not None:
+                return value
+        return selected
 
     @staticmethod
     def _resolve_edge_local_id(detection: Mapping[str, Any]) -> Any:
@@ -691,6 +798,7 @@ __all__ = [
     "TrajectoryObject",
     "TrajectorySnapshot",
     "TrajectorySweepResult",
+    "TrajectoryContractError",
     "TrajectoryStore",
     "TimestampContractError",
     "normalize_utc_timestamp",

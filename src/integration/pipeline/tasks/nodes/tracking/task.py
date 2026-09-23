@@ -67,63 +67,63 @@ class MCMOTTask(QuietTaskBase):
                 },
             )
 
+        # Typed trajectory snapshots are the only supported formal input when
+        # MCMOT is enabled.  Requiring the resource before engine setup also
+        # prevents a missing store from silently routing the normal pipeline
+        # through legacy process_events().
+        trajectory_store = context.require_resource("trajectory_store")
+        if trajectory_store is None:
+            raise KeyError("trajectory_store")
+
         if self._engine is None:
             self._engine = self._init_engine(context)
         context.set_resource("mcmot_engine", self._engine)
         self._ensure_global_map_renderer(context)
 
-        trajectory_store = context.get_resource("trajectory_store")
         snapshot_object_count: int | None = None
         input_unit = "snapshots"
         matching_at: datetime | None = None
         matching_due: bool | None = None
-        if trajectory_store is not None:
-            # Task 只負責觸發與資料連接；cadence、重試與 watermark
-            # 仍由 MCMOT 管理，未到期時只執行 lifecycle maintenance。
-            matching_due = self._engine.is_matching_due()
-        if trajectory_store is not None:
-            assert matching_due is not None
-            if not matching_due:
-                self._engine.maintain()
-                result = self._engine_result_for_skipped_cycle()
-            else:
-                snapshot = trajectory_store.snapshot_since(self._engine.last_successful_watermark)
-                snapshot_object_count = len(snapshot.objects)
-                matching_at = datetime.now(timezone.utc)
+        # Task 只負責觸發與資料連接；cadence、重試與 watermark
+        # 仍由 MCMOT 管理，未到期時只執行 lifecycle maintenance。
+        matching_due = self._engine.is_matching_due()
+        assert matching_due is not None
+        if not matching_due:
+            self._engine.maintain()
+            result = self._engine_result_for_skipped_cycle()
+        else:
+            snapshot = trajectory_store.snapshot_since(self._engine.last_successful_watermark)
+            snapshot_object_count = len(snapshot.objects)
+            matching_at = datetime.now(timezone.utc)
+            try:
+                result = self._engine.process_trajectory_snapshot(snapshot)
+            except Exception as exc:
+                self._record_matching_exception(
+                    context,
+                    processed_events=processed_events,
+                    snapshot_object_count=snapshot_object_count,
+                    input_unit=input_unit,
+                    reason=_failure_reason(exc),
+                )
+                raise
+            if (
+                result.success
+                and result.matching_performed
+                and result.committed_watermark is not None
+                and result.committed_watermark <= snapshot.high_watermark
+            ):
                 try:
-                    result = self._engine.process_trajectory_snapshot(snapshot)
-                except Exception as exc:
+                    trajectory_store.ack(result.committed_watermark)
+                except Exception:
                     self._record_matching_exception(
                         context,
                         processed_events=processed_events,
                         snapshot_object_count=snapshot_object_count,
                         input_unit=input_unit,
-                        reason=_failure_reason(exc),
+                        reason="commit_failed",
+                        matching_at=matching_at,
                     )
                     raise
-                if (
-                    result.success
-                    and result.matching_performed
-                    and result.committed_watermark is not None
-                    and result.committed_watermark <= snapshot.high_watermark
-                ):
-                    try:
-                        trajectory_store.ack(result.committed_watermark)
-                    except Exception:
-                        self._record_matching_exception(
-                            context,
-                            processed_events=processed_events,
-                            snapshot_object_count=snapshot_object_count,
-                            input_unit=input_unit,
-                            reason="commit_failed",
-                            matching_at=matching_at,
-                        )
-                        raise
-        else:
-            input_unit = "legacy_events"
-            snapshot_object_count = processed_events
-            matching_at = datetime.now(timezone.utc)
-            result = self._engine.process_events(events)
         context.set_resource("mc_mot_tracked", result.tracked_objects)
         context.set_resource("mc_mot_global_objects", result.global_objects)
         self._store_cycle_stats(
@@ -148,15 +148,14 @@ class MCMOTTask(QuietTaskBase):
             "tracked": len(result.tracked_objects),
             "global_objects": len(result.global_objects),
         }
-        if trajectory_store is not None:
-            payload.update(
-                {
-                    "success": result.success,
-                    "matching_performed": result.matching_performed,
-                    "committed_watermark": result.committed_watermark,
-                    "reason": _matching_reason(result),
-                }
-            )
+        payload.update(
+            {
+                "success": result.success,
+                "matching_performed": result.matching_performed,
+                "committed_watermark": result.committed_watermark,
+                "reason": _matching_reason(result),
+            }
+        )
         return TaskResult(status="mc_mot_done" if result.success else "mc_mot_failed", payload=payload)
 
     def _store_cycle_stats(

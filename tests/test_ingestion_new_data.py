@@ -151,16 +151,22 @@ def test_default_ingestion_engine_reports_event_filter_reasons() -> None:
                 "timestamp": (now - timedelta(seconds=120)).isoformat(),
                 "detections": [],
             },
+            {
+                "camera_id": "cam-01",
+                "timestamp": now.replace(tzinfo=None).isoformat(),
+                "detections": [],
+            },
             "not-a-mapping",
         ],
     )
 
     assert result.events == []
-    assert result.dropped == 5
+    assert result.dropped == 6
     assert result.drop_reasons == {
         "missing_camera_id": 1,
         "missing_timestamp": 1,
         "invalid_timestamp": 1,
+        "naive_timestamp": 1,
         "stale_event": 1,
         "invalid_event_schema": 1,
     }

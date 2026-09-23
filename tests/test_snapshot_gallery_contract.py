@@ -5,7 +5,12 @@ from types import SimpleNamespace
 
 import pytest
 
-from integration.api.trajectory_store import DetectionEvent, TimestampContractError, TrajectoryStore
+from integration.api.trajectory_store import (
+    DetectionEvent,
+    TimestampContractError,
+    TrajectoryContractError,
+    TrajectoryStore,
+)
 from integration.pipeline.tasks.nodes.tracking.engine import MCMOTEngine
 from mcmot.core.contracts import TrajectorySnapshotEnvelope
 from mcmot.core.mcmot.gallery_components.runtime_factory import GalleryRuntimeFactory
@@ -22,6 +27,7 @@ def test_trajectory_snapshot_excludes_external_global_id_annotation():
                 local_id=7,
                 bbox=[0, 0, 10, 10],
                 timestamp=timestamp,
+                class_name="person",
                 metadata={"global_id": "annotation-only", "frame_seq": 1},
             )
         ]
@@ -57,6 +63,60 @@ def test_app_serializer_rejects_mixed_naive_trajectory_before_mcmot():
 
     with pytest.raises(TimestampContractError, match=r"local_trajectory\[1\]\[0\]"):
         MCMOTEngine._serialize_trajectory_object(obj)
+
+
+@pytest.mark.parametrize("class_name", [None, "", "   "])
+def test_app_serializer_rejects_invalid_class_name_with_field_path(class_name):
+    timestamp = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    obj = SimpleNamespace(
+        camera_id="cam-a",
+        local_id="7",
+        class_name=class_name,
+        latest_bbox=(0.0, 0.0, 10.0, 10.0),
+        latest_score=0.9,
+        latest_feature=None,
+        first_seen_at=timestamp,
+        last_observed_at=timestamp,
+        last_updated_at=timestamp,
+        lifecycle_state="active",
+        latest_timestamp=timestamp,
+        local_trajectory=((timestamp, 5.0, 10.0),),
+        revision=1,
+        watermark=1,
+        latest_metadata={},
+    )
+
+    with pytest.raises(TrajectoryContractError, match=r"snapshot\.class_name"):
+        MCMOTEngine._serialize_trajectory_object(obj)
+
+
+def test_app_serializer_rejects_non_increasing_trajectory_without_sorting():
+    first = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
+    obj = SimpleNamespace(
+        camera_id="cam-a",
+        local_id="7",
+        class_name="person",
+        latest_bbox=(0.0, 0.0, 10.0, 10.0),
+        latest_score=0.9,
+        latest_feature=None,
+        first_seen_at=first,
+        last_observed_at=first,
+        last_updated_at=first,
+        lifecycle_state="active",
+        latest_timestamp=first,
+        local_trajectory=(
+            (first, 5.0, 10.0),
+            (first, 6.0, 11.0),
+        ),
+        revision=2,
+        watermark=2,
+        latest_metadata={},
+    )
+
+    with pytest.raises(TrajectoryContractError, match=r"strictly increasing") as raised:
+        MCMOTEngine._serialize_trajectory_object(obj)
+
+    assert raised.value.path == "snapshot.local_trajectory[1][0]"
 
 
 def test_valid_app_snapshot_reaches_mcmot_with_utc_aware_times():

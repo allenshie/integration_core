@@ -116,19 +116,29 @@ class DefaultIngestionEngine(BaseIngestionEngine):
 
     @staticmethod
     def _parse_timestamp(value: Any) -> datetime | None:
+        timestamp, _reason = DefaultIngestionEngine._parse_timestamp_with_reason(value)
+        return timestamp
+
+    @staticmethod
+    def _parse_timestamp_with_reason(value: Any) -> tuple[datetime | None, str | None]:
+        """Parse only timezone-aware timestamps and normalize them to UTC."""
+
         if isinstance(value, datetime):
-            if value.tzinfo is None:
-                return value.replace(tzinfo=timezone.utc)
-            return value
+            if value.tzinfo is None or value.utcoffset() is None:
+                return None, "naive_timestamp"
+            return value.astimezone(timezone.utc), None
         if isinstance(value, str):
+            raw_value = value.strip()
+            if not raw_value:
+                return None, "invalid_timestamp"
             try:
-                parsed = datetime.fromisoformat(value)
-            except Exception:  # pylint: disable=broad-except
-                return None
-            if parsed.tzinfo is None:
-                return parsed.replace(tzinfo=timezone.utc)
-            return parsed
-        return None
+                parsed = datetime.fromisoformat(raw_value.replace("Z", "+00:00"))
+            except ValueError:
+                return None, "invalid_timestamp"
+            if parsed.tzinfo is None or parsed.utcoffset() is None:
+                return None, "naive_timestamp"
+            return parsed.astimezone(timezone.utc), None
+        return None, "invalid_timestamp"
 
     @staticmethod
     def _normalize_event(
@@ -160,12 +170,24 @@ class DefaultIngestionEngine(BaseIngestionEngine):
             return None, "missing_camera_id"
         if not timestamp_str:
             return None, "missing_timestamp"
-        event_time = DefaultIngestionEngine._parse_timestamp(timestamp_str)
+        event_time, timestamp_reason = DefaultIngestionEngine._parse_timestamp_with_reason(timestamp_str)
         if event_time is None:
-            return None, "invalid_timestamp"
+            return None, timestamp_reason or "invalid_timestamp"
         if now - event_time > max_age:
             return None, "stale_event"
-        capture_ts = DefaultIngestionEngine._parse_timestamp(item.get("capture_ts")) or event_time
+        raw_capture_ts = item.get("capture_ts")
+        if raw_capture_ts is None or (
+            isinstance(raw_capture_ts, str) and not raw_capture_ts.strip()
+        ):
+            capture_ts = event_time
+        else:
+            capture_ts, capture_reason = DefaultIngestionEngine._parse_timestamp_with_reason(
+                raw_capture_ts
+            )
+            if capture_ts is None:
+                if capture_reason == "naive_timestamp":
+                    return None, "naive_capture_timestamp"
+                return None, "invalid_capture_timestamp"
         session_id = item.get("session_id")
         if session_id is not None and not isinstance(session_id, str):
             session_id = str(session_id)

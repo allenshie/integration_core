@@ -12,6 +12,7 @@ from loguru import logger as loguru_logger
 from integration.api.trajectory_store import (
     DetectionEvent,
     TimestampContractError,
+    TrajectoryContractError,
     TrajectoryStore,
 )
 from integration.pipeline.tasks.nodes.ingestion.engine import DefaultIngestionEngine
@@ -143,7 +144,15 @@ def test_store_rejects_naive_timestamp_before_mutating_watermark():
 
     with pytest.raises(TimestampContractError, match=r"timestamp") as raised:
         store.append_events(
-            [DetectionEvent("cam-a", 1, [0, 0, 10, 10], datetime(2026, 1, 1))]
+            [
+                DetectionEvent(
+                    "cam-a",
+                    1,
+                    [0, 0, 10, 10],
+                    datetime(2026, 1, 1),
+                    class_name="person",
+                )
+            ]
         )
 
     assert raised.value.path == "timestamp"
@@ -154,7 +163,9 @@ def test_store_rejects_naive_timestamp_before_mutating_watermark():
 def test_store_normalizes_offset_aware_timestamps_to_utc():
     source = datetime(2026, 1, 1, 20, 0, tzinfo=timezone(timedelta(hours=8)))
     store = TrajectoryStore()
-    store.append_events([DetectionEvent("cam-a", 1, [0, 0, 10, 10], source)])
+    store.append_events(
+        [DetectionEvent("cam-a", 1, [0, 0, 10, 10], source, class_name="person")]
+    )
 
     obj = store.snapshot_since(0).objects[0]
     expected = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
@@ -162,6 +173,172 @@ def test_store_normalizes_offset_aware_timestamps_to_utc():
     assert obj.first_seen_at == expected
     assert obj.local_trajectory[0][0] == expected
     assert obj.latest_timestamp.tzinfo is timezone.utc
+
+
+@pytest.mark.parametrize("class_name", [None, "", "   ", "\t"])
+def test_store_rejects_invalid_class_name_before_mutating_watermark(class_name):
+    store = TrajectoryStore()
+    timestamp = datetime(2026, 1, 1, tzinfo=timezone.utc)
+
+    with pytest.raises(TrajectoryContractError, match=r"class_name"):
+        store.append_events(
+            [DetectionEvent("cam-a", 1, [0, 0, 10, 10], timestamp, class_name=class_name)]
+        )
+
+    assert store.snapshot_since(0).high_watermark == 0
+    assert store.snapshot_since(0).objects == ()
+
+
+def test_edge_events_skip_malformed_detection_and_keep_valid_detection():
+    base = datetime.now(timezone.utc) - timedelta(seconds=2)
+    event = _event(1, base)
+    event["detections"].append(
+        {
+            "track_id": 99,
+            "class_name": "   ",
+            "bbox": [100, 0, 110, 10],
+        }
+    )
+    store = TrajectoryStore()
+
+    output = io.StringIO()
+    handler_id = loguru_logger.add(output, level="WARNING", format="{message}")
+    try:
+        high = store.append_edge_events([event])
+    finally:
+        loguru_logger.remove(handler_id)
+
+    snapshot = store.snapshot_since(0)
+    assert high == 1
+    assert len(snapshot.objects) == 1
+    assert snapshot.objects[0].local_id == "7"
+    assert "skip malformed edge detection" in output.getvalue()
+    assert "class_name" in output.getvalue()
+
+
+def test_store_preserves_label_alias_as_class_name():
+    timestamp = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    store = TrajectoryStore()
+
+    store.append_events(
+        [
+            {
+                "camera_id": "cam-a",
+                "local_id": 1,
+                "bbox": [0, 0, 10, 10],
+                "timestamp": timestamp,
+                "label": "car",
+            }
+        ]
+    )
+
+    assert store.snapshot_since(0).objects[0].class_name == "car"
+
+
+def test_same_timestamp_and_position_is_idempotent():
+    timestamp = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    event = DetectionEvent(
+        "cam-a",
+        1,
+        [0, 0, 10, 10],
+        timestamp,
+        class_name="person",
+    )
+    store = TrajectoryStore()
+
+    assert store.append_events([event]) == 1
+    assert store.append_events([event]) == 1
+
+    obj = store.snapshot_since(0).objects[0]
+    assert obj.revision == 1
+    assert obj.watermark == 1
+    assert obj.local_trajectory == ((timestamp, 5.0, 10.0),)
+
+
+def test_same_timestamp_with_different_position_is_rejected_atomically():
+    timestamp = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    store = TrajectoryStore()
+    store.append_events(
+        [DetectionEvent("cam-a", 1, [0, 0, 10, 10], timestamp, class_name="person")]
+    )
+
+    with pytest.raises(TrajectoryContractError, match=r"conflicting duplicate timestamp"):
+        store.append_events(
+            [DetectionEvent("cam-a", 1, [10, 0, 20, 20], timestamp, class_name="person")]
+        )
+
+    obj = store.snapshot_since(0).objects[0]
+    assert store.snapshot_since(0).high_watermark == 1
+    assert obj.revision == 1
+    assert obj.local_trajectory == ((timestamp, 5.0, 10.0),)
+
+
+def test_older_timestamp_is_rejected_without_overwriting_latest_state():
+    first_timestamp = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
+    latest_timestamp = first_timestamp + timedelta(seconds=1)
+    store = TrajectoryStore()
+    store.append_events(
+        [
+            DetectionEvent(
+                "cam-a",
+                1,
+                [10, 0, 20, 20],
+                latest_timestamp,
+                class_name="person",
+            )
+        ]
+    )
+
+    with pytest.raises(TrajectoryContractError, match=r"older than the latest timestamp"):
+        store.append_events(
+            [DetectionEvent("cam-a", 1, [0, 0, 10, 10], first_timestamp, class_name="person")]
+        )
+
+    obj = store.snapshot_since(0).objects[0]
+    assert obj.latest_timestamp == latest_timestamp
+    assert obj.local_trajectory == ((latest_timestamp, 15.0, 20.0),)
+
+
+def test_strict_batch_validation_prevents_partial_write():
+    timestamp = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    store = TrajectoryStore()
+
+    with pytest.raises(TimestampContractError, match=r"naive datetime"):
+        store.append_events(
+            [
+                DetectionEvent("cam-a", 1, [0, 0, 10, 10], timestamp, class_name="person"),
+                DetectionEvent(
+                    "cam-b",
+                    2,
+                    [20, 0, 30, 10],
+                    datetime(2026, 1, 1),
+                    class_name="car",
+                ),
+            ]
+        )
+
+    assert store.snapshot_since(0).high_watermark == 0
+    assert store.snapshot_since(0).objects == ()
+
+
+def test_snapshot_trajectory_timestamps_are_strictly_increasing():
+    base = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    store = TrajectoryStore()
+    store.append_events(
+        [
+            DetectionEvent(
+                "cam-a",
+                1,
+                [index, 0, index + 10, 10],
+                base + timedelta(seconds=index),
+                class_name="person",
+            )
+            for index in range(3)
+        ]
+    )
+
+    trajectory = store.snapshot_since(0).objects[0].local_trajectory
+    assert all(left[0] < right[0] for left, right in zip(trajectory, trajectory[1:]))
 
 
 def test_mcmot_failure_does_not_ack_and_successful_retry_does(monkeypatch):
@@ -354,8 +531,14 @@ def test_time_window_is_primary_and_raw_trajectory_is_not_ema_overwritten():
     )
     store.append_events(
         [
-            DetectionEvent("cam-a", 1, [0, 0, 10, 10], base),
-            DetectionEvent("cam-a", 1, [10, 0, 20, 20], base + timedelta(seconds=1)),
+            DetectionEvent("cam-a", 1, [0, 0, 10, 10], base, class_name="person"),
+            DetectionEvent(
+                "cam-a",
+                1,
+                [10, 0, 20, 20],
+                base + timedelta(seconds=1),
+                class_name="person",
+            ),
         ]
     )
 
@@ -371,7 +554,15 @@ def test_time_window_is_primary_and_raw_trajectory_is_not_ema_overwritten():
     assert obj.lifecycle_state == "active"
 
     store.append_events(
-        [DetectionEvent("cam-a", 1, [20, 0, 30, 30], base + timedelta(seconds=10))]
+        [
+            DetectionEvent(
+                "cam-a",
+                1,
+                [20, 0, 30, 30],
+                base + timedelta(seconds=10),
+                class_name="person",
+            )
+        ]
     )
     obj = store.snapshot_since(0).objects[0]
     assert obj.local_trajectory == ((base + timedelta(seconds=10), 25.0, 30.0),)
@@ -386,7 +577,9 @@ def test_lifecycle_sweep_distinguishes_idle_grace_expired_and_removed():
         expire_after_seconds=3,
         remove_after_seconds=4,
     )
-    store.append_events([DetectionEvent("cam-a", 1, [0, 0, 10, 10], base)])
+    store.append_events(
+        [DetectionEvent("cam-a", 1, [0, 0, 10, 10], base, class_name="person")]
+    )
 
     assert store.sweep(base + timedelta(seconds=1.5)).transitions[-1].state == "idle"
     assert store.lifecycle_state("cam-a", 1) == "idle"
@@ -403,13 +596,19 @@ def test_objects_are_isolated_by_camera_and_local_id_and_history_is_bounded():
     base = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
     store = TrajectoryStore(retention_seconds=300, max_points=3)
     events = [
-        DetectionEvent("cam-a", 1, [0, 0, 10, 10], base + timedelta(seconds=i))
+        DetectionEvent(
+            "cam-a",
+            1,
+            [0, 0, 10, 10],
+            base + timedelta(seconds=i),
+            class_name="person",
+        )
         for i in range(8)
     ]
     events.extend(
         [
-            DetectionEvent("cam-b", 1, [100, 0, 110, 10], base),
-            DetectionEvent("cam-a", 2, [200, 0, 210, 10], base),
+            DetectionEvent("cam-b", 1, [100, 0, 110, 10], base, class_name="car"),
+            DetectionEvent("cam-a", 2, [200, 0, 210, 10], base, class_name="truck"),
         ]
     )
     store.append_events(events)
@@ -433,7 +632,9 @@ def test_unacknowledged_expired_record_is_retained_until_ack():
         expire_after_seconds=3,
         remove_after_seconds=4,
     )
-    store.append_events([DetectionEvent("cam-a", 1, [0, 0, 10, 10], base)])
+    store.append_events(
+        [DetectionEvent("cam-a", 1, [0, 0, 10, 10], base, class_name="person")]
+    )
 
     deferred = store.maintenance(base + timedelta(seconds=5))
     assert deferred.removed == ()
@@ -451,8 +652,14 @@ def test_point_retention_runs_during_no_event_maintenance():
     store = TrajectoryStore(retention_seconds=2, max_points=100)
     store.append_events(
         [
-            DetectionEvent("cam-a", 1, [0, 0, 10, 10], base),
-            DetectionEvent("cam-a", 1, [10, 0, 20, 20], base + timedelta(seconds=1)),
+            DetectionEvent("cam-a", 1, [0, 0, 10, 10], base, class_name="person"),
+            DetectionEvent(
+                "cam-a",
+                1,
+                [10, 0, 20, 20],
+                base + timedelta(seconds=1),
+                class_name="person",
+            ),
         ]
     )
 
