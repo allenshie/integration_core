@@ -45,4 +45,4 @@ select = ["E4", "E7", "E9", "F"]
 per-file-ignores = { "tests/test_logging.py" = ["E402"] }
 
 [tool.uv.sources]
-MCMOT = { git = "ssh://git@github.com/ChenPingChen/MCMOT.git", rev = "d6ea5a9bf72b2f6429747ed0b65c6bcd41dece73" }
+MCMOT = { git = "ssh://git@github.com/ChenPingChen/MCMOT.git", rev = "20d4c930f3c95ff7f26bc305432b66ac2192b091" }
