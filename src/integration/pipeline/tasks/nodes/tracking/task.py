@@ -68,9 +68,8 @@ class MCMOTTask(QuietTaskBase):
             )
 
         # Typed trajectory snapshots are the only supported formal input when
-        # MCMOT is enabled.  Requiring the resource before engine setup also
-        # prevents a missing store from silently routing the normal pipeline
-        # through legacy process_events().
+        # MCMOT is enabled. Requiring the store before engine setup keeps the
+        # production path on the typed trajectory-snapshot contract.
         trajectory_store = context.require_resource("trajectory_store")
         if trajectory_store is None:
             raise KeyError("trajectory_store")

@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 import sys
 from datetime import datetime, timezone
-from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
 import pytest
@@ -96,25 +95,6 @@ def _build_fake_mcmot_module(state: dict[str, object]) -> ModuleType:
             )
             self._last_timestamp = None
 
-        def process_detected_objects(self, camera_id, timestamp, detected_objects):  # noqa: ANN001
-            state["process_call"] = {
-                "camera_id": camera_id,
-                "timestamp": timestamp,
-                "detected_objects": list(detected_objects),
-            }
-            return [
-                {
-                    "camera_id": camera_id,
-                    "class_name": detected_objects[0]["class_name"],
-                    "local_id": detected_objects[0]["local_id"],
-                    "global_id": "g-1",
-                    "bbox": detected_objects[0]["bbox"],
-                    "score": detected_objects[0]["score"],
-                    "timestamp": timestamp,
-                    "global_trajectory": [(timestamp, 12.0, 34.0)],
-                }
-            ]
-
         def process_trajectory_snapshot(self, *, objects, high_watermark):  # noqa: ANN001
             state["typed_snapshot_call"] = {
                 "objects": list(objects),
@@ -196,68 +176,6 @@ def test_mcmot_task_skips_without_external_package_when_disabled() -> None:
     assert context.get_resource("mc_mot_tracked") == []
     assert context.get_resource("mc_mot_global_objects") == []
     assert context.reported_success == ["mc_mot"]
-
-
-def test_mcmot_engine_uses_external_mcmot_module(monkeypatch) -> None:
-    fake_state: dict[str, object] = {}
-    monkeypatch.setitem(sys.modules, "mcmot", _build_fake_mcmot_module(fake_state))
-
-    tracking_config_path = Path("/tmp/mcmot-tracking-config.yaml")
-    camera_config_path = Path("/tmp/mcmot-camera-config.yaml")
-    engine = MCMOTEngine(
-        tracking_config=str(tracking_config_path),
-        camera_config=str(camera_config_path),
-    )
-
-    timestamp = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
-    result = engine.process_events(
-        [
-            {
-                "camera_id": "cam01",
-                "timestamp": timestamp.isoformat(),
-                "detections": [
-                    {
-                        "local_id": 7,
-                        "class_name": "person",
-                        "score": 0.95,
-                        "bbox": [10, 20, 30, 40],
-                    }
-                ],
-            }
-        ]
-    )
-
-    assert fake_state["tracking_config_path"] == str(tracking_config_path)
-    assert fake_state["camera_config_path"] == str(camera_config_path)
-    assert fake_state["process_call"]["camera_id"] == "cam01"
-    assert fake_state["finalize_timestamp"] == timestamp
-    assert result.tracked_objects == [
-        {
-            "camera_id": "cam01",
-            "class_name": "person",
-            "local_id": 7,
-            "global_id": "g-1",
-            "bbox": [10, 20, 30, 40],
-            "score": 0.95,
-            "timestamp": timestamp.isoformat().replace("+00:00", "Z"),
-            "global_position": {"x": 12.0, "y": 34.0},
-        }
-    ]
-    assert result.global_objects == [
-        {
-            "global_id": "g-1",
-            "class_name": "person",
-            "camera_id": "camera_1",
-            "trajectory": [
-                {
-                    "timestamp": timestamp.isoformat().replace("+00:00", "Z"),
-                    "x": 12.0,
-                    "y": 34.0,
-                }
-            ],
-                    "updated_at": timestamp.isoformat().replace("+00:00", "Z"),
-        }
-    ]
 
 
 @pytest.mark.parametrize(

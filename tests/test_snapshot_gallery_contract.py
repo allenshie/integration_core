@@ -155,6 +155,21 @@ def test_valid_app_snapshot_reaches_mcmot_with_utc_aware_times():
     assert result.committed_watermark == 1
 
 
+def test_unacknowledged_expired_snapshot_remains_serializable_for_retry():
+    base = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    store = TrajectoryStore(retention_seconds=2)
+    store.append_events(
+        [DetectionEvent("cam-a", 7, [0, 0, 10, 10], base, class_name="person")]
+    )
+
+    # Simulate a failed MCMOT attempt followed by maintenance before retry.
+    store.maintenance(base.replace(second=4))
+    snapshot = store.snapshot_since(0)
+    payload = MCMOTEngine._serialize_trajectory_object(snapshot.objects[0])
+
+    assert payload["local_trajectory"] == [[base, 5.0, 10.0]]
+
+
 def test_app_adapter_preserves_attempt_report_as_opaque_result():
     attempt_report = object()
 

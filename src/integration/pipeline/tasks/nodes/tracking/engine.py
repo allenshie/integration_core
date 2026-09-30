@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Sequence
 
@@ -56,35 +56,6 @@ class MCMOTEngine:
         self._last_attempt_report: Any | None = None
         camera_count = len(getattr(self.config, "cameras", []) or [])
         self._log.info(f"MC-MOT engine ready with {camera_count} cameras")
-
-    def process_events(self, events: Iterable[Dict[str, Any]]) -> MCMOTResult:
-        self._last_attempt_report = None
-        events_list = list(events)
-        tracked_payload: List[Dict[str, Any]] = []
-        latest_timestamp: datetime | None = None
-
-        for event in events_list:
-            timestamp = self._ensure_timestamp(event.get("timestamp"))
-            if latest_timestamp is None or timestamp > latest_timestamp:
-                latest_timestamp = timestamp
-
-            camera_id = event.get("camera_id")
-            detections = self._build_detections(event.get("detections") or [])
-            if not camera_id or not detections:
-                continue
-
-            tracked = self._engine.process_detected_objects(
-                camera_id=camera_id,
-                timestamp=timestamp,
-                detected_objects=detections,
-            )
-            if tracked:
-                tracked_payload.extend(self._serialize_tracked(camera_id, tracked))
-
-        finalize_timestamp = latest_timestamp or datetime.now(timezone.utc)
-        self._engine.finalize_global_updates(finalize_timestamp)
-        global_objects = [self._serialize_global(obj) for obj in self._engine.get_all_global_objects()]
-        return MCMOTResult(tracked_objects=tracked_payload, global_objects=global_objects)
 
     @property
     def last_successful_watermark(self) -> int:
@@ -299,35 +270,6 @@ class MCMOTEngine:
             path = (get_config_root() / path).resolve()
         return str(path)
 
-    def _build_detections(self, detections: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        formatted: List[Dict[str, Any]] = []
-        for det in detections:
-            bbox = det.get("bbox") or det.get("box")
-            if not bbox or len(bbox) != 4:
-                continue
-            local_id = det.get("local_id", det.get("track_id"))
-            if local_id is None:
-                continue
-            class_name = det.get("class_name") or det.get("label")
-            if class_name is None:
-                continue
-            score = det.get("score")
-            if score is None:
-                score = det.get("confidence")
-            if score is None:
-                score = 0.0
-            formatted.append(
-                {
-                    "class_name": class_name,
-                    "local_id": int(local_id),
-                    "global_id": det.get("global_id"),
-                    "bbox": [int(x) for x in bbox],
-                    "score": float(score),
-                    "feature": det.get("feature"),
-                }
-            )
-        return formatted
-
     def _serialize_tracked(self, camera_id: str, tracked: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         payload: List[Dict[str, Any]] = []
         for item in tracked:
@@ -365,12 +307,6 @@ class MCMOTEngine:
             "trajectory": trajectory,
             "updated_at": self._to_iso(update_time),
         }
-
-    @staticmethod
-    def _ensure_timestamp(value: Any) -> datetime:
-        timestamp = normalize_utc_timestamp(value, path="event.timestamp")
-        assert timestamp is not None
-        return timestamp
 
     @staticmethod
     def _to_iso(value: Any) -> str | None:

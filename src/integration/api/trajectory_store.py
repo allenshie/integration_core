@@ -555,11 +555,21 @@ class TrajectoryStore:
         if not isinstance(current_timestamp, datetime):
             return
         cutoff = current_timestamp - timedelta(seconds=self._retention_seconds)
-        retained = (
+        retained = [
             point
             for point in state.local_trajectory
             if not isinstance(point[0], datetime) or point[0] >= cutoff
-        )
+        ]
+        # A failed MCMOT attempt leaves the object's revision unacknowledged
+        # for retry.  Keep the latest real point as retry evidence even when
+        # the normal time window has expired; the deque maxlen still bounds
+        # memory usage and acknowledged records retain normal pruning.
+        if (
+            state.last_watermark > self._acknowledged_watermark
+            and not retained
+            and state.local_trajectory
+        ):
+            retained = [state.local_trajectory[-1]]
         state.local_trajectory = deque(retained, maxlen=self._max_points)
 
     @staticmethod

@@ -663,6 +663,36 @@ def test_point_retention_runs_during_no_event_maintenance():
         ]
     )
 
+    # Once the consumer has acknowledged the revision, normal point retention
+    # may reclaim old observations during an idle maintenance cycle.
+    store.ack(2)
     store.maintenance(base + timedelta(seconds=4))
     obj = store.snapshot_since(0).objects[0]
     assert obj.local_trajectory == ()
+
+
+def test_unacknowledged_retry_keeps_trajectory_until_ack():
+    base = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+    store = TrajectoryStore(retention_seconds=2, max_points=100)
+    store.append_events(
+        [
+            DetectionEvent("cam-a", 1, [0, 0, 10, 10], base, class_name="person"),
+            DetectionEvent(
+                "cam-a",
+                1,
+                [10, 0, 20, 20],
+                base + timedelta(seconds=1),
+                class_name="person",
+            ),
+        ]
+    )
+
+    # A failed matching attempt leaves watermark 2 unacknowledged.  The
+    # retry snapshot must still contain trajectory evidence after retention.
+    store.maintenance(base + timedelta(seconds=4))
+    retry_object = store.snapshot_since(0).objects[0]
+    assert retry_object.local_trajectory == ((base + timedelta(seconds=1), 15.0, 20.0),)
+
+    store.ack(2)
+    store.maintenance(base + timedelta(seconds=4))
+    assert store.snapshot_since(0).objects[0].local_trajectory == ()
