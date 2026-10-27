@@ -167,7 +167,12 @@ class MCMOTEngine:
         serialized: List[Dict[str, Any]] = []
         for item in objects:
             if isinstance(item, Mapping):
-                serialized.append(dict(item))
+                payload = dict(item)
+                trajectory = payload.get("trajectory")
+                if isinstance(trajectory, (list, tuple)):
+                    # 與物件路徑一致，只保留最後一點（見 _serialize_global）。
+                    payload["trajectory"] = list(trajectory[-1:])
+                serialized.append(payload)
             else:
                 serialized.append(self._serialize_global(item))
         return serialized
@@ -289,23 +294,24 @@ class MCMOTEngine:
         return payload
 
     def _serialize_global(self, obj: Any) -> Dict[str, Any]:
-        trajectory = []
-        for entry in getattr(obj, "trajectory", []) or []:
-            ts, x, y = entry
-            trajectory.append(
-                {
-                    "timestamp": self._to_iso(ts),
-                    "x": float(x),
-                    "y": float(y),
-                }
-            )
+        # 【重要節點：只轉換最後一點】下游（formatting、全域地圖、matching broadcast 與其錄製）
+        # 只讀取 trajectory[-1]；只轉換最後一點，成本不隨 MCMOT global 軌跡長度成長。
+        trajectory = getattr(obj, "trajectory", []) or []
         update_time = getattr(obj, "update_time", None)
         return {
             "global_id": getattr(obj, "global_id", None),
             "class_name": getattr(obj, "class_name", None),
             "camera_id": getattr(obj, "camera_id", None),
-            "trajectory": trajectory,
+            "trajectory": [self._serialize_point(trajectory[-1])] if trajectory else [],
             "updated_at": self._to_iso(update_time),
+        }
+
+    def _serialize_point(self, entry: Any) -> Dict[str, Any]:
+        ts, x, y = entry
+        return {
+            "timestamp": self._to_iso(ts),
+            "x": float(x),
+            "y": float(y),
         }
 
     @staticmethod

@@ -197,6 +197,57 @@ def test_mcmot_engine_requires_both_config_paths(
         )
 
 
+def _engine_with_global_objects(monkeypatch, global_objects):  # noqa: ANN001
+    monkeypatch.setitem(sys.modules, "mcmot", _build_fake_mcmot_module({}))
+    engine = MCMOTEngine(
+        tracking_config="/tmp/mcmot-tracking-config.yaml",
+        camera_config="/tmp/mcmot-camera-config.yaml",
+    )
+    engine._engine = SimpleNamespace(get_all_global_objects=lambda: global_objects)
+    return engine
+
+
+def test_global_objects_serialize_only_the_latest_trajectory_point(monkeypatch) -> None:
+    """下游只讀取 trajectory[-1]，只轉換最後一點；其餘欄位不變。"""
+    t0 = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+    timestamps = [t0.replace(second=second) for second in (0, 1, 2)]
+    engine = _engine_with_global_objects(
+        monkeypatch,
+        [
+            SimpleNamespace(
+                global_id="g-1",
+                class_name="car",
+                camera_id="camera_1",
+                trajectory=[(timestamps[0], 1, 2), (timestamps[1], 3, 4), (timestamps[2], 5, 6)],
+                update_time=timestamps[2],
+            ),
+            SimpleNamespace(global_id="g-2", class_name="car", camera_id="camera_1", trajectory=[], update_time=None),
+        ],
+    )
+
+    assert engine.get_all_global_objects() == [
+        {
+            "global_id": "g-1",
+            "class_name": "car",
+            "camera_id": "camera_1",
+            "trajectory": [{"timestamp": "2026-01-01T12:00:02Z", "x": 5.0, "y": 6.0}],
+            "updated_at": "2026-01-01T12:00:02Z",
+        },
+        {"global_id": "g-2", "class_name": "car", "camera_id": "camera_1", "trajectory": [], "updated_at": None},
+    ]
+
+
+def test_mapping_global_objects_keep_only_the_latest_trajectory_point(monkeypatch) -> None:
+    original = {"global_id": "g-1", "trajectory": [{"x": 1.0, "y": 2.0}, {"x": 3.0, "y": 4.0}]}
+    engine = _engine_with_global_objects(monkeypatch, [original, {"global_id": "g-2"}])
+
+    assert engine.get_all_global_objects() == [
+        {"global_id": "g-1", "trajectory": [{"x": 3.0, "y": 4.0}]},
+        {"global_id": "g-2"},
+    ]
+    assert len(original["trajectory"]) == 2  # 不修改 MCMOT 回傳的資料
+
+
 def test_mcmot_task_initializes_engine_from_external_module(monkeypatch) -> None:
     fake_state: dict[str, object] = {}
     monkeypatch.setitem(sys.modules, "mcmot", _build_fake_mcmot_module(fake_state))
