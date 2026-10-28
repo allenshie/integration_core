@@ -351,6 +351,55 @@ def test_mcmot_task_keeps_attempt_report_opaque_and_does_not_render_detail(
     assert "matching_attempt" not in caplog.text
 
 
+def test_mcmot_task_exits_process_when_mcmot_is_in_failed_state(monkeypatch) -> None:
+    from mcmot.core.contracts import MCMOTFailedStateError
+
+    module = _build_fake_mcmot_module({})
+
+    def _raise_failed_state(self, *, objects, high_watermark):  # noqa: ANN001
+        raise MCMOTFailedStateError("MCMOT stopped after an unexpected error") from ValueError("boom")
+
+    monkeypatch.setattr(module.MCMOT, "process_trajectory_snapshot", _raise_failed_state)
+    monkeypatch.setitem(sys.modules, "mcmot", module)
+    context = DummyContext(
+        config=SimpleNamespace(
+            mcmot_enabled=True,
+            mcmot_tracking_config_path="/tmp/mcmot-tracking-config.yaml",
+            mcmot_camera_config_path="/tmp/mcmot-camera-config.yaml",
+            global_map_visualization_enabled=False,
+        ),
+        resources={"trajectory_store": _TypedStore(), "edge_events": []},
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        MCMOTTask().execute(context)
+
+    assert exc_info.value.code == 1
+    assert isinstance(exc_info.value.__cause__, MCMOTFailedStateError)
+
+
+def test_mcmot_task_reraises_other_matching_errors(monkeypatch) -> None:
+    module = _build_fake_mcmot_module({})
+
+    def _raise_value_error(self, *, objects, high_watermark):  # noqa: ANN001
+        raise ValueError("boom")
+
+    monkeypatch.setattr(module.MCMOT, "process_trajectory_snapshot", _raise_value_error)
+    monkeypatch.setitem(sys.modules, "mcmot", module)
+    context = DummyContext(
+        config=SimpleNamespace(
+            mcmot_enabled=True,
+            mcmot_tracking_config_path="/tmp/mcmot-tracking-config.yaml",
+            mcmot_camera_config_path="/tmp/mcmot-camera-config.yaml",
+            global_map_visualization_enabled=False,
+        ),
+        resources={"trajectory_store": _TypedStore(), "edge_events": []},
+    )
+
+    with pytest.raises(ValueError, match="boom"):
+        MCMOTTask().execute(context)
+
+
 def test_mcmot_enabled_requires_trajectory_store(monkeypatch) -> None:
     monkeypatch.setitem(sys.modules, "mcmot", _build_fake_mcmot_module({}))
     context = DummyContext(

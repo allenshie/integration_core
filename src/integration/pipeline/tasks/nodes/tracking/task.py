@@ -23,6 +23,18 @@ class MCMOTTask(QuietTaskBase):
         self._engine: MCMOTEngine | None = None
 
     def run(self, context: TaskContext) -> TaskResult:
+        try:
+            return self._run(context)
+        except Exception as exc:
+            if not _is_mcmot_failed_state(exc):
+                raise
+            # 【重要節點：MCMOT 失效狀態】MCMOT 遇到非預期錯誤後拒絕所有後續呼叫，
+            # 外層 runner 只會不斷重試；結束程序（exit code 1）交給容器重啟。
+            # SystemExit 不是 Exception，不會被 pipeline 與 runner 的 except Exception 攔下。
+            context.logger.error(f"MC-MOT 已進入失效狀態，結束程序等待重啟：{exc}；首次錯誤：{exc.__cause__!r}")
+            raise SystemExit(1) from exc
+
+    def _run(self, context: TaskContext) -> TaskResult:
         events = list(context.get_resource("edge_events") or [])
         processed_events = len(events)
         if not context.config.mcmot_enabled:
@@ -333,6 +345,15 @@ def _matching_reason(result: MCMOTResult) -> str:
     if result.committed_watermark is not None:
         return "matched_and_committed"
     return "matching_succeeded"
+
+
+def _is_mcmot_failed_state(error: Exception) -> bool:
+    # mcmot 只在啟用時才需要安裝，因此延遲 import。
+    try:
+        from mcmot.core.contracts import MCMOTFailedStateError
+    except ModuleNotFoundError:
+        return False
+    return isinstance(error, MCMOTFailedStateError)
 
 
 def _failure_reason(value: Any) -> str:

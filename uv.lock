@@ -99,7 +99,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "loguru", specifier = ">=0.7.3" },
-    { name = "mcmot", git = "ssh://git@github.com/ChenPingChen/MCMOT.git?rev=bec7a592b045017a6973c8dfa7b4fbdfc7f9e5f4" },
+    { name = "mcmot", git = "ssh://git@github.com/ChenPingChen/MCMOT.git?rev=9b0a04be1e79e02b382d7dbcb71c6b70bd9edfa5" },
     { name = "numpy", specifier = "==1.26" },
     { name = "opencv-python", specifier = ">=4.11.0.86,<4.12.0" },
     { name = "paho-mqtt", specifier = ">=1.6.1" },
@@ -139,7 +139,7 @@ wheels = [
 [[package]]
 name = "mcmot"
 version = "0.1.0"
-source = { git = "ssh://git@github.com/ChenPingChen/MCMOT.git?rev=bec7a592b045017a6973c8dfa7b4fbdfc7f9e5f4#bec7a592b045017a6973c8dfa7b4fbdfc7f9e5f4" }
+source = { git = "ssh://git@github.com/ChenPingChen/MCMOT.git?rev=9b0a04be1e79e02b382d7dbcb71c6b70bd9edfa5#9b0a04be1e79e02b382d7dbcb71c6b70bd9edfa5" }
 dependencies = [
     { name = "fastdtw" },
     { name = "loguru" },

@@ -6,7 +6,7 @@ from importlib.metadata import distribution
 from mcmot import MCMOT
 
 
-EXPECTED_MCMOT_COMMIT = "bec7a592b045017a6973c8dfa7b4fbdfc7f9e5f4"
+EXPECTED_MCMOT_COMMIT = "9b0a04be1e79e02b382d7dbcb71c6b70bd9edfa5"
 
 
 def test_uv_loads_pinned_mcmot_batch_api():
