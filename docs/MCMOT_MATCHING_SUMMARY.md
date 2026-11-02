@@ -60,4 +60,4 @@ rejected、unmatched 與 error 等結果，並顯示 `match_cost` 與 `reason`�
 matching attempt。
 
 完整欄位與 decision 說明請見 MCMOT 專案的
-[匹配摘要日誌文件](../../../MCMOT/docs/MATCHING_SUMMARY.md)。
+[匹配摘要日誌文件](../../../MCMOT/docs/guides/matching-summary-log.md)。
