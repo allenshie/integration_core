@@ -14,7 +14,7 @@ from datetime import datetime, timedelta, timezone
 import math
 import numbers
 from threading import RLock
-from typing import Any, Iterable, Literal, Mapping, Sequence, TypeAlias
+from typing import Any, Collection, Iterable, Literal, Mapping, Sequence, TypeAlias
 
 from loguru import logger
 
@@ -492,19 +492,32 @@ class TrajectoryStore:
         with self._lock:
             return len(self._objects)
 
-    def snapshot_since(self, watermark: int) -> TrajectorySnapshot:
+    def snapshot_since(
+        self,
+        watermark: int,
+        class_names: Collection[str] | None = None,
+    ) -> TrajectorySnapshot:
         """Return the latest state for objects revised after ``watermark``.
 
         The returned DTOs own their trajectory and metadata copies, so callers
         may inspect or modify them without racing with future appends.
+
+        ``class_names`` limits the result to objects of those classes, and
+        filtered objects are not copied.  ``None`` applies no filter, while an
+        empty collection returns no objects.  ``high_watermark`` always covers
+        the whole store, so callers can use it as their next starting point.
         """
 
         watermark = self._validate_watermark(watermark)
+        # 【重要節點：單一字串也是 Collection，in 會變成子字串比對，必須拒絕】
+        if isinstance(class_names, str):
+            raise TypeError("class_names must be a collection of strings, not a string")
         with self._lock:
             objects = tuple(
                 self._snapshot_object(state)
                 for state in self._objects.values()
                 if state.last_watermark > watermark
+                and (class_names is None or state.class_name in class_names)
             )
             return TrajectorySnapshot(objects=objects, high_watermark=self._watermark)
 

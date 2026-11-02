@@ -696,3 +696,105 @@ def test_unacknowledged_retry_keeps_trajectory_until_ack():
     store.ack(2)
     store.maintenance(base + timedelta(seconds=4))
     assert store.snapshot_since(0).objects[0].local_trajectory == ()
+
+
+def _mixed_class_store(base: datetime) -> TrajectoryStore:
+    store = TrajectoryStore(retention=10)
+    store.append_events(
+        [
+            DetectionEvent("cam-a", 1, [0, 0, 10, 10], base, class_name="car"),
+            DetectionEvent("cam-a", 2, [0, 0, 10, 10], base, class_name="traffic_signal"),
+            DetectionEvent("cam-b", 3, [0, 0, 10, 10], base, class_name="person"),
+        ]
+    )
+    return store
+
+
+def test_snapshot_without_class_names_returns_all_objects_in_order():
+    base = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+    store = _mixed_class_store(base)
+
+    snapshot = store.snapshot_since(0)
+
+    assert [obj.local_id for obj in snapshot.objects] == ["1", "2", "3"]
+    assert snapshot.high_watermark == 3
+    assert store.snapshot_since(0, class_names=None) == snapshot
+
+
+def test_snapshot_class_names_returns_only_matching_objects():
+    base = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+    store = _mixed_class_store(base)
+
+    snapshot = store.snapshot_since(0, class_names={"traffic_signal"})
+
+    assert [obj.class_name for obj in snapshot.objects] == ["traffic_signal"]
+    # The whole store's watermark is returned so the caller can resume from it.
+    assert snapshot.high_watermark == 3
+
+
+def test_snapshot_empty_class_names_returns_no_objects():
+    base = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+    store = _mixed_class_store(base)
+
+    snapshot = store.snapshot_since(0, class_names=set())
+
+    assert snapshot.objects == ()
+    assert snapshot.high_watermark == 3
+
+
+def test_snapshot_applies_watermark_and_class_names_together():
+    base = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+    store = _mixed_class_store(base)
+    high_watermark = store.snapshot_since(0).high_watermark
+
+    store.append_events(
+        [
+            DetectionEvent(
+                "cam-a",
+                1,
+                [1, 0, 11, 10],
+                base + timedelta(seconds=1),
+                class_name="car",
+            )
+        ]
+    )
+    assert store.snapshot_since(high_watermark, class_names={"traffic_signal"}).objects == ()
+
+    store.append_events(
+        [
+            DetectionEvent(
+                "cam-a",
+                2,
+                [1, 0, 11, 10],
+                base + timedelta(seconds=1),
+                class_name="traffic_signal",
+            )
+        ]
+    )
+    snapshot = store.snapshot_since(high_watermark, class_names={"traffic_signal"})
+    assert [obj.local_id for obj in snapshot.objects] == ["2"]
+    assert snapshot.objects[0].revision == 2
+
+
+def test_snapshot_does_not_copy_objects_filtered_by_class(monkeypatch):
+    base = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+    store = _mixed_class_store(base)
+    original = TrajectoryStore._snapshot_object
+    copied: list[str] = []
+
+    def counting_snapshot(state):
+        copied.append(state.class_name)
+        return original(state)
+
+    monkeypatch.setattr(TrajectoryStore, "_snapshot_object", staticmethod(counting_snapshot))
+
+    store.snapshot_since(0, class_names={"traffic_signal"})
+
+    assert copied == ["traffic_signal"]
+
+
+def test_snapshot_rejects_single_string_class_names():
+    store = TrajectoryStore(retention=10)
+
+    with pytest.raises(TypeError, match=r"not a string"):
+        store.snapshot_since(0, class_names="traffic_signal")
