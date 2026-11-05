@@ -6,4 +6,4 @@ python-dotenv>=0.21.0
 paho-mqtt>=1.6.1
 git+https://github.com/allenshie/smart-workflow.git@39134386064e85be54ed47e1cf2b767cb6cdf7ac
 MCMOT @ git+ssh://git@github.com/ChenPingChen/MCMOT.git@20d4c930f3c95ff7f26bc305432b66ac2192b091
-smart-messaging-core==0.1.2
+smart-messaging-core==0.1.3
