@@ -107,7 +107,7 @@ requires-dist = [
     { name = "pytest", marker = "extra == 'test'", specifier = ">=8.4.2" },
     { name = "python-dotenv", specifier = ">=0.21.0" },
     { name = "pyyaml", specifier = ">=6.0" },
-    { name = "smart-messaging-core", specifier = "==0.1.1" },
+    { name = "smart-messaging-core", specifier = "==0.1.2" },
     { name = "smart-workflow", git = "https://github.com/allenshie/smart-workflow.git?rev=39134386064e85be54ed47e1cf2b767cb6cdf7ac#39134386064e85be54ed47e1cf2b767cb6cdf7ac" },
 ]
 
@@ -702,16 +702,16 @@ wheels = [
 
 [[package]]
 name = "smart-messaging-core"
-version = "0.1.1"
+version = "0.1.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "kafka-python" },
     { name = "paho-mqtt" },
     { name = "redis" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/f7/d5/52bdce5e24da79ebd68c166aa909308016c8840142aecd590b51ec473aa8/smart_messaging_core-0.1.1.tar.gz", hash = "sha256:806d9c693eccbbee3fbcb961bd31de4a3f743a8f39ea6cc2bf052e9b32a9b5c9", size = 10727 }
+sdist = { url = "https://files.pythonhosted.org/packages/35/db/8b60e510e5f7ab2fb9c4ca6add78b3e3c9acddbdd1c157fda8beefb8badf/smart_messaging_core-0.1.2.tar.gz", hash = "sha256:6fa1495ee4c121f2dfec04bda1791a14074bea8668ef39d1583e44a312a4b818", size = 13652 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/39/53/4bc3e2866a6038dd64decec9236adee85b5962aa4765cd5d58bd7eed08b3/smart_messaging_core-0.1.1-py3-none-any.whl", hash = "sha256:0b736b6f21b7c0f48f9d31bf4d967463c875add7142ad9fc977525841783e4fc", size = 11843 },
+    { url = "https://files.pythonhosted.org/packages/33/75/72ca6b3e7b6f93e66aa36472d999b0256f0151eca754eabce4cd24941355/smart_messaging_core-0.1.2-py3-none-any.whl", hash = "sha256:e813b9a934b1c7744b4424b9344bd2471787ae698b28ce82c3d9b4386eeeaf12", size = 12492 },
 ]
 
 [[package]]
